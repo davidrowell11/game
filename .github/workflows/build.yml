@@ -62,6 +62,12 @@ jobs:
             release/*.dmg
             release/*.AppImage
           if-no-files-found: error
+      - name: Verify the macOS app is signed and universal
+        if: matrix.name == 'macos'
+        run: |
+          APP=$(ls -d release/mac-universal/*.app)
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          lipo -archs "$APP/Contents/MacOS/Depthwarden"
 
   release:
     # Publishes a GitHub Release named after the version in package.json
@@ -97,9 +103,8 @@ jobs:
 
             | Computer | File |
             | --- | --- |
-            | Windows 10/11 | `Depthwarden-*-win-x64.exe` (installer) or `Depthwarden-*-windows-portable.exe` |
-            | Mac, Apple Silicon (M1/M2/M3/M4) | `Depthwarden-*-mac-arm64.dmg` |
-            | Mac, Intel | `Depthwarden-*-mac-x64.dmg` |
-            | Linux | `Depthwarden-*-linux-x86_64.AppImage` |
+            | Windows 10/11 | `Depthwarden-Setup.exe` |
+            | Mac (Apple Silicon or Intel) | `Depthwarden-mac.dmg` |
+            | Linux | `Depthwarden-linux.AppImage` |
 
             Step-by-step install instructions (including the first-launch security prompts) are in the [README](https://github.com/davidrowell11/game#install).

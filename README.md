@@ -8,52 +8,33 @@ A 3D roguelite dungeon crawler for **Windows** and **macOS** (Linux too). Every 
 
 ## Install
 
-### 1. Download
+### Windows
 
-Go to the **[Releases page](https://github.com/davidrowell11/game/releases/latest)** and download the file for your computer:
+1. **[Download Depthwarden-Setup.exe](https://github.com/davidrowell11/game/releases/latest/download/Depthwarden-Setup.exe)**
+2. Double-click it. The game installs and starts on its own. There's nothing to click through.
+   - If Windows shows **"Windows protected your PC"**, click **More info**, then **Run anyway**. This appears because the game isn't signed with a paid certificate.
+3. To play again later, use the **Depthwarden** shortcut on your Desktop or in the Start Menu.
 
-| Your computer | File to download |
-| --- | --- |
-| Windows 10 / 11 | `Depthwarden-<version>-win-x64.exe` (installer) |
-| Windows, no install | `Depthwarden-<version>-windows-portable.exe` (just run it) |
-| Mac with Apple Silicon (M1, M2, M3, M4…) | `Depthwarden-<version>-mac-arm64.dmg` |
-| Mac with an Intel processor | `Depthwarden-<version>-mac-x64.dmg` |
-| Linux | `Depthwarden-<version>-linux-x86_64.AppImage` |
+To uninstall: Settings → Apps → Depthwarden → Uninstall.
 
-Not sure which Mac you have? Click the Apple menu  → **About This Mac**. If it says **Chip: Apple M…**, use `arm64`. If it says **Processor: Intel…**, use `x64`.
+### Mac (Apple Silicon and Intel)
 
-> Is the Releases page empty? Open the **[Actions tab](https://github.com/davidrowell11/game/actions/workflows/build.yml)**, click the newest green run, and download the installer from the **Artifacts** section at the bottom. You need to be signed in to GitHub, and the files come zipped.
+1. **[Download Depthwarden-mac.dmg](https://github.com/davidrowell11/game/releases/latest/download/Depthwarden-mac.dmg)**
+2. Double-click it, then drag **Depthwarden** onto the **Applications** folder in the window that opens.
+3. **The first time only:** in Applications, **right-click** Depthwarden → **Open** → **Open**. After that, it opens normally.
+   - On macOS 15 or newer, if there's no **Open** button: try to open the app once, then go to **System Settings → Privacy & Security** and click **Open Anyway**.
+   - If it says the app **"is damaged"**, open **Terminal**, paste this, and press Enter:
+     ```bash
+     xattr -cr /Applications/Depthwarden.app
+     ```
 
-### 2. Windows
+To uninstall: drag Depthwarden from Applications to the Trash.
 
-1. Double-click `Depthwarden-…-win-x64.exe`.
-2. Windows may show **"Windows protected your PC"**. This appears because the game isn't signed with a paid certificate. Click **More info**, then **Run anyway**.
-3. Follow the installer. You can choose the install folder. It adds Desktop and Start Menu shortcuts.
-4. Launch **Depthwarden** from the Start Menu or the Desktop.
+### Linux
 
-**Uninstall:** Settings → Apps → Installed apps → Depthwarden → Uninstall.
+**[Download Depthwarden-linux.AppImage](https://github.com/davidrowell11/game/releases/latest/download/Depthwarden-linux.AppImage)**, right-click it → Properties → allow it to run as a program, then double-click it.
 
-### 3. macOS
-
-1. Double-click the `.dmg` file.
-2. Drag **Depthwarden** into the **Applications** folder, then eject the disk image.
-3. The first time only, open **Applications**, **right-click** (or Control-click) Depthwarden, choose **Open**, then click **Open** again. macOS asks this because the app isn't notarized by Apple. After the first time, it opens normally.
-   - On macOS 15 (Sequoia) or newer, if there's no **Open** button: try to open the app once, then go to **System Settings → Privacy & Security**, scroll down, and click **Open Anyway** next to Depthwarden.
-4. If macOS says the app **"is damaged and can't be opened"**, open **Terminal** and run this, then try again:
-   ```bash
-   xattr -cr /Applications/Depthwarden.app
-   ```
-
-**Uninstall:** drag Depthwarden from Applications to the Trash.
-
-### 4. Linux
-
-```bash
-chmod +x Depthwarden-*.AppImage
-```
-```bash
-./Depthwarden-*.AppImage
-```
+All downloads are also listed on the [Releases page](https://github.com/davidrowell11/game/releases/latest).
 
 ### System requirements
 

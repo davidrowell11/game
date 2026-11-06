@@ -1,6 +1,6 @@
 {
   "name": "depthwarden",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "A 3D roguelite dungeon crawler with procedurally generated dungeons.",
   "author": "David Rowell",
   "license": "MIT",
@@ -37,7 +37,6 @@
       "electron/**/*",
       "package.json"
     ],
-    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
     "win": {
       "target": [
         {
@@ -45,47 +44,57 @@
           "arch": [
             "x64"
           ]
-        },
-        {
-          "target": "portable",
-          "arch": [
-            "x64"
-          ]
         }
-      ]
-    },
-    "portable": {
-      "artifactName": "${productName}-${version}-windows-portable.${ext}"
+      ],
+      "artifactName": "Depthwarden-Setup.${ext}"
     },
     "nsis": {
-      "oneClick": false,
+      "oneClick": true,
       "perMachine": false,
-      "allowToChangeInstallationDirectory": true,
+      "runAfterFinish": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Depthwarden"
+      "shortcutName": "Depthwarden",
+      "deleteAppDataOnUninstall": false
     },
     "mac": {
       "target": [
         {
           "target": "dmg",
           "arch": [
-            "arm64",
-            "x64"
+            "universal"
           ]
         }
       ],
       "category": "public.app-category.games",
-      "identity": null
+      "identity": null,
+      "artifactName": "Depthwarden-mac.${ext}"
     },
     "dmg": {
-      "title": "Depthwarden"
+      "title": "Depthwarden",
+      "contents": [
+        {
+          "x": 150,
+          "y": 190
+        },
+        {
+          "x": 390,
+          "y": 190,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ],
+      "window": {
+        "width": 540,
+        "height": 380
+      }
     },
     "linux": {
       "target": [
         "AppImage"
       ],
-      "category": "Game"
+      "category": "Game",
+      "artifactName": "Depthwarden-linux.${ext}"
     },
     "afterPack": "build/afterPack.cjs"
   }
