@@ -10,6 +10,7 @@ import { UI } from './ui.js';
 import { loadSave, writeSave } from './save.js';
 import { sfx, unlockAudio, setVolume, startDrone } from './audio.js';
 import { glowTexture } from './textures.js';
+import { makeTrap, makeUrn, makeMerchant, trapState, TRAP_PERIOD } from './props.js';
 
 const CAM_OFFSET = new THREE.Vector3(0, 19, 12.5);
 
@@ -83,6 +84,11 @@ export class Game {
     this.perkById = Object.fromEntries(PERKS.map((p) => [p.id, p]));
     this.enemies = [];
     this.interactables = [];
+    this.traps = [];
+    this.urns = [];
+    this.dying = [];
+    this.blasts = [];
+    this.hitStop = 0;
     this.state = 'menu';
     this.world = null;
     this.player = null;
@@ -109,6 +115,7 @@ export class Game {
     on('btn-armory', () => this.openArmory());
     on('btn-controls', () => this.ui.show('controls'));
     on('btn-resume', () => this.resume());
+    on('btn-leave-shop', () => this.closeShop());
     on('btn-abandon', () => {
       this.endRun();
       this.toMenu();
@@ -232,6 +239,11 @@ export class Game {
     this.enemies = [];
     for (const it of this.interactables) this.scene.remove(it.mesh);
     this.interactables = [];
+    for (const o of [...this.traps, ...this.urns, ...this.dying]) this.scene.remove(o.mesh);
+    this.traps = [];
+    this.urns = [];
+    this.dying = [];
+    this.blasts = [];
     this.projectiles.clear();
     this.pickups.clear();
     this.fx.clear();
@@ -258,6 +270,19 @@ export class Game {
       if (it.kind === 'potion') this.pickups.spawn('potion', c.x, c.z);
       else this._makeInteractable(it.kind, c.x, c.z);
     }
+    for (const t of d.traps) {
+      const c = tileCenter(t.x, t.y);
+      const trap = makeTrap(c.x, c.z);
+      this.scene.add(trap.mesh);
+      this.traps.push({ ...trap, x: c.x, z: c.z, tx: t.x, ty: t.y, phase: t.phase * TRAP_PERIOD, cycle: -1 });
+    }
+    d.urns.forEach((u, i) => {
+      const c = tileCenter(u.x, u.y);
+      const mesh = makeUrn(c.x, c.z, u.x * 7 + u.y * 13 + i);
+      this.scene.add(mesh);
+      this.urns.push({ x: c.x, z: c.z, mesh, broken: false });
+    });
+    this.merchantBoons = 0;
     const st = tileCenter(d.stairs.x, d.stairs.y);
     this.stairs = this._makeInteractable('stairs', st.x, st.z);
     this.stairsLocked = d.boss;
@@ -311,6 +336,11 @@ export class Game {
       it.light = new THREE.PointLight(0xffc860, 4, 5, 1.5);
       it.light.position.y = 1.3;
       g.add(base, band, it.lid, it.light);
+    } else if (kind === 'merchant') {
+      g.add(makeMerchant());
+      it.light = new THREE.PointLight(0xffc88a, 9, 9, 1.4);
+      it.light.position.set(0.5, 1.8, 0);
+      g.add(it.light);
     } else if (kind === 'shrine') {
       const stone = new THREE.MeshStandardMaterial({ color: 0x8a8a90, roughness: 0.9 });
       const base = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 1.1, 0.5, 10), stone);
@@ -409,8 +439,8 @@ export class Game {
     this.shake(0.5);
   }
 
-  enemyShoot(e, angle, speed, dmg) {
-    sfx.enemyShot();
+  enemyShoot(e, angle, speed, dmg, quiet = false) {
+    if (!quiet) sfx.enemyShot();
     this.projectiles.spawn({ x: e.pos.x + Math.sin(angle) * e.radius, z: e.pos.z + Math.cos(angle) * e.radius, angle, speed, dmg, owner: 'enemy', radius: 0.22, life: 3 });
   }
 
@@ -441,10 +471,21 @@ export class Game {
     if (e.hp <= 0) this.killEnemy(e);
   }
 
-  killEnemy(e) {
+  killEnemy(e, selfDestruct = false) {
+    if (e.dead && !selfDestruct) return;
     e.dead = true;
-    this.scene.remove(e.mesh);
-    this.enemies.splice(this.enemies.indexOf(e), 1);
+    const i = this.enemies.indexOf(e);
+    if (i >= 0) this.enemies.splice(i, 1);
+    e.mat.emissive.setRGB(1, 1, 1);
+    this.dying.push({ mesh: e.mesh, t: 0, s: e.mesh.scale.x });
+    if (selfDestruct) return; // a Bloater that blew itself up gives no reward
+    if (e.type === 'bloater' && !e.exploded) {
+      e.exploded = true;
+      this.blasts.push({ x: e.pos.x, z: e.pos.z, t: 0.4, r: e.def.blast * 0.85, dmg: e.dmg * 0.8 });
+      this.fx.ring(e.pos.x, e.pos.z, e.def.blast * 0.85, 0xc8e04a);
+      sfx.fuse();
+    }
+    this.hitStop = Math.max(this.hitStop, e.type === 'boss' ? 0.6 : e.elite ? 0.09 : 0.045);
     this.player.kills += 1;
     sfx.enemyDie();
     this.fx.burst(e.pos.x, 0.8, e.pos.z, e.def.color, e.type === 'boss' ? 80 : 18, e.type === 'boss' ? 9 : 5, 0.9);
@@ -470,6 +511,99 @@ export class Game {
       for (let i = 0; i < n; i++) this.pickups.spawn('gold', e.pos.x, e.pos.z, Math.max(1, Math.round((1 + this.depth * 0.5) * goldMul)));
     }
     if (Math.random() < (e.elite ? 0.4 : 0.035)) this.pickups.spawn('potion', e.pos.x, e.pos.z);
+  }
+
+  explode(x, z, r, dmg, src) {
+    sfx.boom();
+    this.shake(0.6);
+    this.fx.ring(x, z, r, 0xd8f05a);
+    this.fx.burst(x, 0.6, z, 0xb8d84a, 40, 8, 0.8);
+    this.fx.burst(x, 0.6, z, 0xff9a3a, 24, 6, 0.6);
+    const p = this.player;
+    if (Math.hypot(p.pos.x - x, p.pos.z - z) < r + p.radius) this.damagePlayer(dmg, null);
+    for (const e of this.enemies.slice()) {
+      if (e === src || e.dead) continue;
+      const d = Math.hypot(e.pos.x - x, e.pos.z - z);
+      if (d < r + e.radius) this.damageEnemy(e, Math.round(dmg * 1.5), false, (e.pos.x - x) / (d || 1), (e.pos.z - z) / (d || 1));
+    }
+    for (const u of this.urns) if (!u.broken && Math.hypot(u.x - x, u.z - z) < r) this.breakUrn(u);
+  }
+
+  breakUrn(u) {
+    u.broken = true;
+    this.scene.remove(u.mesh);
+    sfx.shatter();
+    this.fx.burst(u.x, 0.5, u.z, 0xa8643a, 14, 4, 0.6);
+    const roll = Math.random();
+    if (roll < 0.55) {
+      const n = 1 + ((Math.random() * 3) | 0);
+      for (let i = 0; i < n; i++) this.pickups.spawn('gold', u.x, u.z, Math.max(1, Math.round((1 + this.depth * 0.4) * this.player.stats.goldMult)));
+    } else if (roll < 0.65) this.pickups.spawn('potion', u.x, u.z);
+    else if (roll < 0.85) this.pickups.spawn('xp', u.x, u.z, 2 + this.depth);
+  }
+
+  openShop() {
+    this.state = 'shop';
+    const p = this.player;
+    const d = this.depth;
+    const render = () => {
+      const offers = [
+        { icon: '⚗', name: 'Healing Draught', desc: '+1 potion (carry up to 5)', cost: 12 + 3 * d, ok: p.potions < 5, buy: () => (p.potions += 1) },
+        { icon: '♥', name: 'Full Restore', desc: 'Heal to full health', cost: 18 + 5 * d, ok: p.hp < p.stats.maxHp, buy: () => (p.hp = p.stats.maxHp) },
+        {
+          icon: '✦',
+          name: 'Mystery Boon',
+          desc: 'Choose 1 of 3 perks',
+          cost: Math.round((35 + 10 * d) * (1 + 0.6 * this.merchantBoons)),
+          ok: true,
+          buy: () => {
+            this.merchantBoons += 1;
+            this.pendingChests += 1;
+            this.closeShop();
+          },
+        },
+      ];
+      this.ui.renderShop(p.gold, offers, (o) => {
+        if (p.gold < o.cost || !o.ok) return;
+        p.gold -= o.cost;
+        sfx.buy();
+        o.buy();
+        if (this.state === 'shop') render();
+      });
+    };
+    render();
+    this.ui.show('shop');
+  }
+
+  closeShop() {
+    this.ui.hideAll();
+    this.state = 'playing';
+  }
+
+  _updateTraps(dt) {
+    const p = this.player;
+    const [ptx, pty] = this.world.toTile(p.pos.x, p.pos.z);
+    for (const tr of this.traps) {
+      const t = (this.time + tr.phase) % TRAP_PERIOD;
+      const cycle = Math.floor((this.time + tr.phase) / TRAP_PERIOD);
+      const st = trapState(t);
+      const target = st === 'up' ? 0 : st === 'warn' ? -0.55 : -0.75;
+      tr.spikes.position.y += (target - tr.spikes.position.y) * Math.min(1, dt * (st === 'up' ? 30 : 8));
+      if (st !== 'up') continue;
+      if (tr.cycle !== cycle) {
+        tr.cycle = cycle;
+        if (Math.hypot(tr.x - p.pos.x, tr.z - p.pos.z) < 14) sfx.spike();
+      }
+      if (ptx === tr.tx && pty === tr.ty && p.dashT <= 0) this.damagePlayer(8 + this.depth * 2, null);
+      for (const e of this.enemies.slice()) {
+        if (e.def.float || e.type === 'boss' || e._trapCycle === cycle) continue;
+        const [ex, ey] = this.world.toTile(e.pos.x, e.pos.z);
+        if (ex === tr.tx && ey === tr.ty) {
+          e._trapCycle = cycle;
+          this.damageEnemy(e, 12 + this.depth * 3, false);
+        }
+      }
+    }
   }
 
   damagePlayer(amount, src) {
@@ -532,9 +666,18 @@ export class Game {
     this.time += dt;
     const state = this.state;
     if (state === 'menu') this._updateMenu(dt);
-    else if (state === 'playing') this._update(dt);
+    else if (state === 'playing') {
+      // brief hit-stop on kills and big hits gives impacts some weight
+      let simDt = dt;
+      if (this.hitStop > 0) {
+        this.hitStop -= dt;
+        simDt = dt * 0.1;
+      }
+      this._update(simDt);
+    }
     else if (state === 'dead') this._updateFx(dt);
     else if (state === 'paused' && this.input.hit('Escape', 'KeyP')) this.resume();
+    else if (state === 'shop' && this.input.hit('Escape', 'KeyE')) this.closeShop();
     this.renderer.render(this.scene, this.camera);
     this.input.endFrame();
     requestAnimationFrame((t) => this._frame(t));
@@ -545,12 +688,23 @@ export class Game {
     const c = this.menuCenter;
     this.camera.position.set(c.x + Math.cos(t) * 26, 24, c.z + Math.sin(t) * 26);
     this.camera.lookAt(c.x, 0, c.z);
-    this.world.update(dt, this.time, c.x + Math.cos(t * 2) * 10, c.z + Math.sin(t * 2) * 10);
+    this.world.update(dt, this.time, c.x + Math.cos(t * 2) * 10, c.z + Math.sin(t * 2) * 10, false);
   }
 
   _updateFx(dt) {
     this.ui.update(dt, this);
     this.fx.update(dt);
+    for (let i = this.dying.length - 1; i >= 0; i--) {
+      const d = this.dying[i];
+      d.t += dt;
+      const k = 1 - d.t / 0.22;
+      if (k <= 0) {
+        this.scene.remove(d.mesh);
+        this.dying.splice(i, 1);
+        continue;
+      }
+      d.mesh.scale.set(d.s * (1 + (1 - k) * 0.4), d.s * k, d.s * (1 + (1 - k) * 0.4));
+    }
     this.numbers.update(dt, this.camera, this.vw, this.vh);
     this.world.update(dt, this.time, this.player.pos.x, this.player.pos.z);
     this._updateCamera(dt);
@@ -622,6 +776,16 @@ export class Game {
         const { amount, crit } = this.rollDamage(s.dmg);
         this.damageEnemy(e, amount, crit, dx / (d || 1), dz / (d || 1));
       }
+      for (const u of this.urns) {
+        if (u.broken) continue;
+        const dx = u.x - p.pos.x;
+        const dz = u.z - p.pos.z;
+        const d = Math.hypot(dx, dz);
+        if (d > reach + 0.4) continue;
+        let diff = Math.atan2(dx, dz) - p.facing;
+        diff = Math.atan2(Math.sin(diff), Math.cos(diff));
+        if (Math.abs(diff) <= s.swingArc / 2 || d < 0.9) this.breakUrn(u);
+      }
       // deflect enemy projectiles
       const list = this.projectiles.list;
       for (let i = list.length - 1; i >= 0; i--) {
@@ -672,6 +836,15 @@ export class Game {
     this._updateProjectiles(dt);
     this._updatePickups(dt);
     this._updateInteractables(dt);
+    this._updateTraps(dt);
+    for (let i = this.blasts.length - 1; i >= 0; i--) {
+      const b = this.blasts[i];
+      b.t -= dt;
+      if (b.t <= 0) {
+        this.blasts.splice(i, 1);
+        this.explode(b.x, b.z, b.r, b.dmg, null);
+      }
+    }
 
     // ---- fog of war & minimap
     this.revealTimer -= dt;
@@ -712,6 +885,12 @@ export class Game {
         continue;
       }
       if (pr.owner === 'player') {
+        const urn = this.urns.find((u) => !u.broken && (u.x - pr.x) ** 2 + (u.z - pr.z) ** 2 < 0.45);
+        if (urn) {
+          this.breakUrn(urn);
+          this.projectiles.remove(i);
+          continue;
+        }
         let removed = false;
         for (const e of this.enemies.slice()) {
           if (pr.hit.has(e)) continue;
@@ -787,6 +966,20 @@ export class Game {
 
   _updateInteractables(dt) {
     const p = this.player;
+    // chests, shrines and the merchant's stall are solid
+    const solid = { chest: 0.75, shrine: 1.0, merchant: 1.1 };
+    for (const it of this.interactables) {
+      const r = solid[it.kind];
+      if (!r) continue;
+      const dx = p.pos.x - it.x;
+      const dz = p.pos.z - it.z;
+      const d = Math.hypot(dx, dz);
+      const min = r + p.radius;
+      if (d < min && d > 1e-4) {
+        p.pos.x = it.x + (dx / d) * min;
+        p.pos.z = it.z + (dz / d) * min;
+      }
+    }
     let nearest = null;
     let nd = 2.2;
     for (const it of this.interactables) {
@@ -811,6 +1004,7 @@ export class Game {
       stairs: this.stairsLocked ? 'Sealed — defeat the guardian' : '[E] Descend',
       chest: '[E] Open chest',
       shrine: '[E] Pray at the shrine',
+      merchant: '[E] Trade with the merchant',
     };
     this.ui.prompt(nearest ? labels[nearest.kind] : '');
     if (nearest && this.input.hit('KeyE')) this._interact(nearest);
@@ -833,6 +1027,8 @@ export class Game {
       for (let i = 0; i < n; i++) this.pickups.spawn('gold', it.x, it.z, Math.max(1, Math.round((2 + this.depth) * p.stats.goldMult)));
       this.fx.burst(it.x, 1, it.z, 0xffd04a, 30, 5);
       this.pendingChests += 1;
+    } else if (it.kind === 'merchant') {
+      this.openShop();
     } else if (it.kind === 'shrine') {
       it.used = true;
       it.orbMat.color.set(0x334038);

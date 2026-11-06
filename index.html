@@ -61,10 +61,10 @@
         <table>
           <tr><td>WASD / Arrows</td><td>Move</td></tr>
           <tr><td>Mouse</td><td>Aim</td></tr>
-          <tr><td>Left mouse (hold)</td><td>Sword sweep (also deflects projectiles)</td></tr>
+          <tr><td>Left mouse (hold)</td><td>Sword sweep (deflects projectiles, smashes urns)</td></tr>
           <tr><td>Right mouse (hold)</td><td>Arcane bolt</td></tr>
           <tr><td>Space / Shift</td><td>Dash (invulnerable while dashing)</td></tr>
-          <tr><td>E</td><td>Interact: chests, shrines, stairs</td></tr>
+          <tr><td>E</td><td>Interact: chests, shrines, merchants, stairs</td></tr>
           <tr><td>Q</td><td>Drink potion</td></tr>
           <tr><td>Tab</td><td>Toggle large map</td></tr>
           <tr><td>Esc / P</td><td>Pause</td></tr>
@@ -78,6 +78,14 @@
         <h2 id="perks-title">Level Up!</h2>
         <p class="sub">Choose a boon (1, 2, 3)</p>
         <div id="perk-cards"></div>
+      </div>
+
+      <div id="shop" class="screen hidden overlay">
+        <h2>The Wandering Merchant</h2>
+        <p class="sub">"Gold spent down here is gold you won't bank... but you might live to bank the rest."</p>
+        <div id="shop-gold"></div>
+        <div id="shop-items"></div>
+        <button id="btn-leave-shop">Leave (E / Esc)</button>
       </div>
 
       <div id="pause" class="screen hidden overlay">

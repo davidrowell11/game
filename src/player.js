@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { baseStats } from './perks.js';
 import { upgradeLevel } from './save.js';
+import { blobShadow } from './enemies.js';
 
 export const xpForLevel = (lvl) => Math.round(12 + lvl * 9 + lvl * lvl * 1.5);
 
@@ -74,12 +75,20 @@ export class Player {
     this.trail = new THREE.Mesh(trailGeo, this.trailMat);
     this.trail.position.y = 0.9;
 
+    // Faint ground arc showing where the sword will reach.
+    const aimGeo = new THREE.RingGeometry(0.55, 1, 32, 1, -Math.PI / 2 - Math.PI * 0.4, Math.PI * 0.8);
+    aimGeo.rotateX(-Math.PI / 2);
+    this.aimMat = new THREE.MeshBasicMaterial({ color: 0xffe2b8, transparent: true, opacity: 0.1, depthWrite: false, side: THREE.DoubleSide });
+    this.aim = new THREE.Mesh(aimGeo, this.aimMat);
+    this.aim.position.y = 0.04;
+    this.shadow = blobShadow(this.radius);
+
     const light = new THREE.PointLight(0xffe2b8, 9, 13, 1.3);
     light.position.y = 2.6;
 
-    g.add(body, head, hood, belt, eyeL, eyeR, this.swordPivot, this.trail, light);
+    g.add(this.shadow, this.aim, body, head, hood, belt, eyeL, eyeR, this.swordPivot, this.trail, light);
     g.traverse((o) => {
-      if (o.isMesh && o !== this.trail) o.castShadow = true;
+      if (o.isMesh && o !== this.trail && o !== this.aim && o !== this.shadow) o.castShadow = true;
     });
     this.mesh = g;
     this.body = body;
@@ -115,6 +124,10 @@ export class Player {
       this.swordPivot.rotation.y += (0.9 - this.swordPivot.rotation.y) * Math.min(1, dt * 10);
       this.trailMat.opacity = 0;
     }
+    // aim arc matches the current sword reach and arc
+    const r = this.stats.swingRange;
+    this.aim.scale.set(r * (this.stats.swingArc / (Math.PI * 0.8)), 1, r);
+    this.aimMat.opacity = this.attackTimer > 0 ? 0.04 : 0.1;
     // hurt flash + dash ghosting
     const flash = this.hurtFlash > 0 ? 0.8 : 0;
     this.materials[0].emissive.setRGB(flash, flash * 0.1, flash * 0.1);

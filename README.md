@@ -65,13 +65,16 @@ All downloads are also listed on the [Releases page](https://github.com/davidrow
 - **Every floor is generated** from the run seed. Rooms are joined by corridors, and some corridors loop back on themselves. Floors get larger and more dangerous as you go down.
 - Find the **glowing portal** (shown in blue on the minimap) and press **E** to go down.
 - Every **4th floor** is a **Guardian** floor. The portal stays sealed (red) until the boss dies. Beat the guardian of **floor 12** to win. After that, you can keep descending in endless mode.
+- Rooms come in different shapes: halls, round chambers, crosses and twisting caverns.
 - **Gold chests** give you a free perk. **Green shrines** heal you and raise your max health.
+- From floor 2, a **Wandering Merchant** (purple on the minimap) may set up shop. Spend the gold you've collected this run on potions, a full heal or extra perks. Gold you spend is gold you won't bank.
+- **Smash urns** with your sword or bolts for gold, potions and XP. Watch out for **spike traps**: they rattle just before they fire, they hurt monsters too, and you can dash across them safely.
 - Enemies drop **XP crystals** (green), **gold** and sometimes **potions**. When you level up, pick 1 of 3 random perks: split bolts, lifesteal, thorns, crits, and more.
 - **Elite** enemies are bigger, glow orange, and drop better loot.
 - When you die, all gold you carried is **banked**. Spend it in the **Armory** on the main menu on permanent upgrades: Vitality, Might, Swiftness, Fortune, Satchel, Second Wind.
 - **Seeds:** type a seed on the main menu to replay the same dungeon layouts, or to share a run with a friend. Leave it blank for a random run.
 
-**Enemies:** Husks (melee), Spitters (ranged), Brutes (they telegraph, then charge, and are stunned if they hit a wall), Wisps (fast swarmers), Bone Shamans (summon Husks), and the Hollow Warden boss (bullet novas, aimed fans, ground slams and summons, and it gets enraged below 50% health).
+**Enemies:** Husks (melee), Spitters (ranged), Brutes (they telegraph, then charge, and are stunned if they hit a wall), Bloaters (they swell up and explode, and also burst when killed, so lure them into groups), Wisps (fast swarmers), Bone Shamans (summon Husks), and the Hollow Warden boss (bullet novas, aimed fans, ground slams and summons; below 50% health it gets enraged and adds spiral bullet streams).
 
 Your progress is saved automatically here:
 - Windows: `%APPDATA%\Depthwarden`
@@ -147,6 +150,7 @@ src/
   perks.js      Level-up perks and base stats
   save.js       Persistent gold and Armory upgrades
   effects.js    Particles, projectiles, pickups, damage numbers
+  props.js      Spike traps, breakable urns, the merchant
   ui.js         HUD, minimap, menus
   audio.js      Sound effects synthesised at runtime (no audio files)
   textures.js   Procedural textures (no image files)

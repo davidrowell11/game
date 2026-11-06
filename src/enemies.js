@@ -1,11 +1,13 @@
 // Enemy archetypes, models and AI.
 import * as THREE from 'three';
 import { sfx } from './audio.js';
+import { glowTexture } from './textures.js';
 
 export const ENEMY_DEFS = {
   husk: { name: 'Husk', hp: 32, speed: 3.3, dmg: 9, radius: 0.48, xp: 3, gold: 0.35, ai: 'melee', reach: 1.25, windup: 0.42, cd: 1.0, color: 0x7f9c5e },
   spitter: { name: 'Spitter', hp: 24, speed: 2.7, dmg: 8, radius: 0.45, xp: 4, gold: 0.45, ai: 'ranged', range: 10, windup: 0.4, cd: 1.9, projSpeed: 9, color: 0xb36ad8 },
   brute: { name: 'Brute', hp: 95, speed: 2.1, dmg: 18, radius: 0.85, xp: 9, gold: 0.8, ai: 'charger', reach: 1.7, windup: 0.75, cd: 2.4, color: 0xa65632 },
+  bloater: { name: 'Bloater', hp: 40, speed: 2.7, dmg: 26, radius: 0.6, xp: 5, gold: 0.5, ai: 'bomber', reach: 1.6, windup: 0.85, cd: 0, blast: 3.2, color: 0x9ab83a },
   wisp: { name: 'Wisp', hp: 13, speed: 5.6, dmg: 6, radius: 0.34, xp: 2, gold: 0.25, ai: 'melee', reach: 0.95, windup: 0.22, cd: 0.7, color: 0x6ae4ff, float: true },
   shaman: { name: 'Bone Shaman', hp: 45, speed: 2.4, dmg: 7, radius: 0.5, xp: 8, gold: 0.9, ai: 'summoner', range: 11, windup: 0.6, cd: 4.5, projSpeed: 8, color: 0xe0d7a8 },
   boss: { name: 'The Hollow Warden', hp: 750, speed: 2.5, dmg: 16, radius: 1.5, xp: 60, gold: 1, ai: 'boss', reach: 2.4, windup: 0.6, cd: 2.4, projSpeed: 8.5, color: 0x5a3c78 },
@@ -16,8 +18,19 @@ function geo(key, make) {
   return geoCache[key] || (geoCache[key] = make());
 }
 
+let shadowMat = null;
+export function blobShadow(radius) {
+  if (!shadowMat) shadowMat = new THREE.MeshBasicMaterial({ map: glowTexture(), color: 0x000000, transparent: true, opacity: 0.55, depthWrite: false });
+  const m = new THREE.Mesh(geo('shadow', () => new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2)), shadowMat);
+  m.position.y = 0.03;
+  m.scale.setScalar(radius * 3);
+  m.renderOrder = -1;
+  return m;
+}
+
 function buildModel(type, def, elite) {
   const g = new THREE.Group();
+  g.add(blobShadow(def.radius));
   const mat = new THREE.MeshStandardMaterial({ color: def.color, roughness: 0.6, metalness: 0.1, emissive: 0x000000 });
   const eyeMat = new THREE.MeshBasicMaterial({ color: type === 'wisp' ? 0xffffff : 0xff3a2a });
   const eye = geo('eye', () => new THREE.SphereGeometry(0.06, 6, 6));
@@ -66,6 +79,21 @@ function buildModel(type, def, elite) {
         g.add(h);
       }
       addEyes(1.15, 0.51, 0.25, 1.5);
+      break;
+    }
+    case 'bloater': {
+      body = new THREE.Mesh(geo('bloater', () => new THREE.SphereGeometry(0.62, 14, 10)), mat);
+      body.position.y = 0.75;
+      const pusMat = new THREE.MeshStandardMaterial({ color: 0xe8e060, emissive: 0x4a4400 });
+      const pus = geo('pus', () => new THREE.SphereGeometry(0.14, 8, 6));
+      for (let i = 0; i < 6; i++) {
+        const a = i * 2.4;
+        const p = new THREE.Mesh(pus, pusMat);
+        p.position.set(Math.cos(a) * 0.5, 0.75 + Math.sin(i * 1.7) * 0.3, Math.sin(a) * 0.5);
+        body.add(p);
+        p.position.y -= 0.75;
+      }
+      addEyes(0.95, 0.55, 0.16, 1.2);
       break;
     }
     case 'wisp': {
@@ -294,6 +322,26 @@ export class Enemy {
           }
           break;
         }
+        case 'bomber': {
+          if (this.state === 'windup') {
+            // fuse: swell, flash and beep, then burst
+            if (Math.floor(this.stateT * 8) !== Math.floor((this.stateT - dt) * 8)) sfx.fuse();
+            if (this.stateT >= this.def.windup) {
+              this.exploded = true;
+              g.explode(this.pos.x, this.pos.z, this.def.blast * (this.elite ? 1.3 : 1), this.dmg, this);
+              g.killEnemy(this, true);
+              return;
+            }
+          } else {
+            this.state = 'chase';
+            face();
+            if (dist <= this.def.reach + p.radius + this.radius) {
+              this.state = 'windup';
+              this.stateT = 0;
+            } else [mx, mz] = toward();
+          }
+          break;
+        }
         case 'boss':
           [mx, mz] = this.updateBoss(dt, g, dx, dz, dist, toward);
           break;
@@ -318,14 +366,14 @@ export class Enemy {
       }
     }
 
-    const sp = this.state === 'windup' || this.state === 'stunned' || this.state === 'charge' ? 0 : this.speed * (this.phase === 2 ? 1.35 : 1);
+    const sp = this.state === 'windup' || this.state === 'stunned' || this.state === 'charge' || this.state === 'spiral' ? 0 : this.speed * (this.phase === 2 ? 1.35 : 1);
     w.moveCircle(this.pos, (mx * sp + this.knock.x) * dt, (mz * sp + this.knock.y) * dt, this.radius);
     this.knock.multiplyScalar(Math.max(0, 1 - dt * 8));
 
     // visuals
     this.mesh.position.set(this.pos.x, this.def.float ? Math.sin(g.time * 4 + this.wander) * 0.15 : 0, this.pos.z);
     this.mesh.rotation.y = this.facing;
-    const windup = this.state === 'windup';
+    const windup = this.state === 'windup' || this.state === 'spiral';
     if (this.flash > 0) this.mat.emissive.setRGB(1, 1, 1);
     else if (windup) this.mat.emissive.setRGB(0.6 + Math.sin(this.stateT * 40) * 0.3, 0.1, 0.05);
     else this.mat.emissive.copy(this.baseEmissive);
@@ -344,6 +392,20 @@ export class Enemy {
     }
     this.facing = Math.atan2(dx, dz);
     this.body.rotation.y += dt * (this.phase === 2 ? 2 : 0.8);
+    if (this.state === 'spiral') {
+      // twin rotating streams of bullets
+      this.spiralAcc = (this.spiralAcc || 0) + dt;
+      while (this.spiralAcc > 0.09) {
+        this.spiralAcc -= 0.09;
+        const a = this.spiralBase + this.stateT * 2.6;
+        for (let k = 0; k < 3; k++) g.enemyShoot(this, a + (k * Math.PI * 2) / 3, this.def.projSpeed * 0.75, this.dmg * 0.6, true);
+      }
+      if (this.stateT > 2.6) {
+        this.state = 'chase';
+        this.cd = this.def.cd;
+      }
+      return [0, 0];
+    }
     if (this.state === 'windup') {
       if (this.stateT < this.def.windup) return [0, 0];
       const pattern = this.pattern;
@@ -361,6 +423,11 @@ export class Enemy {
           g.spawnEnemy(Math.random() < 0.5 ? 'husk' : 'wisp', this.pos.x + Math.cos(ang) * 3, this.pos.z + Math.sin(ang) * 3, true);
         }
         g.fx.burst(this.pos.x, 1.5, this.pos.z, 0xb070ff, 30, 6);
+      } else if (pattern === 'spiral') {
+        this.state = 'spiral';
+        this.stateT = 0;
+        this.spiralBase = a;
+        return [0, 0];
       } else if (pattern === 'slam') {
         g.shake(0.4);
         g.fx.ring(this.pos.x, this.pos.z, 4.5, 0xff5a8a);
@@ -371,7 +438,7 @@ export class Enemy {
       return [0, 0];
     }
     if (this.cd <= 0) {
-      const patterns = dist < 4.5 ? ['slam', 'nova'] : ['nova', 'fan', 'fan', 'summon'];
+      const patterns = dist < 4.5 ? ['slam', 'nova'] : this.phase === 2 ? ['spiral', 'fan', 'nova', 'summon', 'fan'] : ['nova', 'fan', 'fan', 'summon'];
       this.pattern = patterns[this.patternIdx++ % patterns.length];
       if (this.pattern === 'summon' && g.enemies.length > 14) this.pattern = 'fan';
       this.state = 'windup';

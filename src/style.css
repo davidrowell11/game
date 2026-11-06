@@ -507,3 +507,25 @@ button.primary {
 #death-stats div:nth-child(even) {
   font-weight: 700;
 }
+
+#shop-gold {
+  color: var(--gold);
+  font-size: 22px;
+  font-weight: 700;
+  margin: 6px 0 14px;
+}
+#shop-items {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  justify-content: center;
+  margin-bottom: 18px;
+}
+.shop-item {
+  cursor: default;
+}
+.shop-item button {
+  margin-top: auto;
+  font-size: 15px;
+  padding: 6px 12px;
+}

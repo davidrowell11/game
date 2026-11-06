@@ -227,7 +227,13 @@ export class World {
       walls.setColorAt(i, col.setScalar(v));
     });
     walls.receiveShadow = true;
+    walls.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     this.group.add(walls);
+    this.walls = walls;
+    this.wallCells = wallCells;
+    this.wallIndex = new Map(wallCells.map(([x, y], i) => [y * W + x, i]));
+    this.wallH = new Float32Array(wallCells.length).fill(1);
+    this.loweredWalls = new Set();
 
     // Floor
     const floorGeo = new THREE.PlaneGeometry(T, T);
@@ -255,9 +261,9 @@ export class World {
     this.disposables.push(baseGeo, baseMat, flameGeo, flameMat, glowMat);
     this.torches = this.d.torches.map((t, i) => {
       const c = tileCenter(t.x, t.y);
-      // nudge toward the room corner so it hugs the wall
-      const nx = this.walkable(t.x - 1, t.y) ? 0.35 : -0.35;
-      const nz = this.walkable(t.x, t.y - 1) ? 0.35 : -0.35;
+      // nudge toward the neighbouring wall(s) so it hugs the wall
+      const nx = !this.walkable(t.x + 1, t.y) ? 0.35 : !this.walkable(t.x - 1, t.y) ? -0.35 : 0;
+      const nz = !this.walkable(t.x, t.y + 1) ? 0.35 : !this.walkable(t.x, t.y - 1) ? -0.35 : 0;
       const g = new THREE.Group();
       g.position.set(c.x + nx * 1.2, 0, c.z + nz * 1.2);
       const base = new THREE.Mesh(baseGeo, baseMat);
@@ -273,6 +279,8 @@ export class World {
       return { group: g, flame, phase: i * 1.7 };
     });
 
+    this._buildDecor();
+
     this.lights = [];
     for (let i = 0; i < 6; i++) {
       const l = new THREE.PointLight(theme.torch, 0, 16, 1.4);
@@ -282,7 +290,77 @@ export class World {
     }
   }
 
-  update(dt, time, px, pz) {
+  _buildDecor() {
+    const byKind = { bones: [], rubble: [], skull: [] };
+    for (const d of this.d.decor || []) byKind[d.kind].push(d);
+    const defs = {
+      bones: [new THREE.CylinderGeometry(0.05, 0.05, 0.7, 5).rotateZ(Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0xd8d0bc, roughness: 0.9 })],
+      rubble: [new THREE.DodecahedronGeometry(0.22, 0), new THREE.MeshStandardMaterial({ color: this.theme.wall, roughness: 1 })],
+      skull: [new THREE.SphereGeometry(0.17, 8, 6), new THREE.MeshStandardMaterial({ color: 0xe8e0cc, roughness: 0.8 })],
+    };
+    const m = new THREE.Matrix4();
+    const q = new THREE.Quaternion();
+    const v = new THREE.Vector3();
+    const sc = new THREE.Vector3();
+    const up = new THREE.Vector3(0, 1, 0);
+    for (const [kind, list] of Object.entries(byKind)) {
+      const [geo, mat] = defs[kind];
+      this.disposables.push(geo, mat);
+      if (!list.length) continue;
+      // rubble comes in little clusters, bones in crossed pairs
+      const per = kind === 'rubble' ? 3 : kind === 'bones' ? 2 : 1;
+      const mesh = new THREE.InstancedMesh(geo, mat, list.length * per);
+      let i = 0;
+      for (const d of list) {
+        const c = tileCenter(d.x, d.y);
+        for (let k = 0; k < per; k++) {
+          const a = d.rot + k * 1.9;
+          const off = kind === 'rubble' ? 0.3 * k : 0;
+          v.set(c.x + d.ox + Math.cos(a) * off, kind === 'skull' ? 0.15 : kind === 'bones' ? 0.05 : 0.1, c.z + d.oy + Math.sin(a) * off);
+          q.setFromAxisAngle(up, a + (kind === 'bones' ? k * 1.2 : 0));
+          const s = kind === 'rubble' ? 0.6 + ((k * 37 + d.x) % 5) / 6 : 1;
+          m.compose(v, q, sc.set(s, s * 0.8, s));
+          mesh.setMatrixAt(i++, m);
+        }
+      }
+      this.group.add(mesh);
+    }
+  }
+
+  // Lower the walls between the camera (which sits south of the player, +z)
+  // and the player so the hero is never hidden behind masonry.
+  _updateCutaway(dt, px, pz) {
+    const [tx, ty] = this.toTile(px, pz);
+    const want = new Set();
+    for (let y = ty + 1; y <= ty + 4; y++) {
+      for (let x = tx - 3; x <= tx + 3; x++) {
+        const i = this.wallIndex.get(y * this.W + x);
+        if (i !== undefined) want.add(i);
+      }
+    }
+    for (const i of want) this.loweredWalls.add(i);
+    if (!this.loweredWalls.size) return;
+    const m = this._cutM || (this._cutM = new THREE.Matrix4());
+    const q = new THREE.Quaternion();
+    const v = new THREE.Vector3();
+    const sc = new THREE.Vector3();
+    for (const i of this.loweredWalls) {
+      const target = want.has(i) ? 0.22 : 1;
+      let h = this.wallH[i];
+      h += (target - h) * Math.min(1, dt * 10);
+      if (Math.abs(h - target) < 0.01) h = target;
+      this.wallH[i] = h;
+      if (h === 1 && target === 1) this.loweredWalls.delete(i);
+      const [x, y] = this.wallCells[i];
+      const c = tileCenter(x, y);
+      m.compose(v.set(c.x, (WALL_H * h) / 2, c.z), q, sc.set(1, h, 1));
+      this.walls.setMatrixAt(i, m);
+    }
+    this.walls.instanceMatrix.needsUpdate = true;
+  }
+
+  update(dt, time, px, pz, cutaway = true) {
+    if (cutaway) this._updateCutaway(dt, px, pz);
     for (const t of this.torches) {
       const s = 1 + Math.sin(time * 9 + t.phase) * 0.12 + Math.sin(time * 23 + t.phase) * 0.06;
       t.flame.scale.set(1, s, 1);

@@ -1,8 +1,9 @@
 // Procedural dungeon generator.
-// Rooms are scattered without overlap, joined with a minimum spanning tree
+// Rooms are scattered without overlap and given a shape (rectangle, round
+// chamber, cross or organic cavern), then joined with a minimum spanning tree
 // (so every room is reachable) plus a few extra corridors to create loops.
 // The room farthest from the start (by walking distance) holds the stairs,
-// and every BOSS_EVERY floors that room becomes a boss arena.
+// and every BOSS_EVERY floors the largest far room becomes a boss arena.
 
 import { RNG } from './rng.js';
 
@@ -15,6 +16,7 @@ export const ENEMY_POOL = [
   { type: 'husk', minDepth: 1, weight: 10 },
   { type: 'spitter', minDepth: 1, weight: 5 },
   { type: 'brute', minDepth: 2, weight: 3 },
+  { type: 'bloater', minDepth: 2, weight: 3 },
   { type: 'wisp', minDepth: 3, weight: 5 },
   { type: 'shaman', minDepth: 5, weight: 2 },
 ];
@@ -41,18 +43,87 @@ export function generateDungeon(seed, depth) {
   const boss = isBossFloor(depth);
   for (let attempt = 0; attempt < 800 && rooms.length < targetRooms; attempt++) {
     const big = boss && rooms.length === 1; // reserve a large arena candidate
-    const w = big ? rng.int(13, 15) : rng.int(5, 11);
-    const h = big ? rng.int(13, 15) : rng.int(5, 11);
+    const w = big ? rng.int(13, 15) : rng.int(5, 12);
+    const h = big ? rng.int(13, 15) : rng.int(5, 12);
     const x = rng.int(2, W - w - 3);
     const y = rng.int(2, H - h - 3);
-    const overlaps = rooms.some(
-      (o) => x - 2 < o.x + o.w && x + w + 2 > o.x && y - 2 < o.y + o.h && y + h + 2 > o.y,
-    );
+    const overlaps = rooms.some((o) => x - 2 < o.x + o.w && x + w + 2 > o.x && y - 2 < o.y + o.h && y + h + 2 > o.y);
     if (overlaps) continue;
-    rooms.push({ x, y, w, h, cx: x + (w >> 1), cy: y + (h >> 1), role: 'combat' });
+    let shape = 'rect';
+    if (rooms.length > 0 && !big && w >= 7 && h >= 7) {
+      shape = rng.weighted([
+        { weight: 5, value: 'rect' },
+        { weight: 2, value: 'round' },
+        { weight: 2, value: 'cross' },
+        { weight: 3, value: 'cavern' },
+      ]);
+    }
+    rooms.push({ x, y, w, h, cx: x + (w >> 1), cy: y + (h >> 1), role: 'combat', shape });
   }
-  for (const r of rooms) {
-    for (let yy = r.y; yy < r.y + r.h; yy++) for (let xx = r.x; xx < r.x + r.w; xx++) carve(xx, yy);
+  for (const r of rooms) carveRoom(r);
+
+  function carveRoom(r) {
+    const { x, y, w, h, cx, cy } = r;
+    if (r.shape === 'rect') {
+      for (let yy = y; yy < y + h; yy++) for (let xx = x; xx < x + w; xx++) carve(xx, yy);
+    } else if (r.shape === 'round') {
+      const rx = w / 2;
+      const ry = h / 2;
+      for (let yy = y; yy < y + h; yy++)
+        for (let xx = x; xx < x + w; xx++) {
+          const nx = (xx + 0.5 - (x + rx)) / rx;
+          const ny = (yy + 0.5 - (y + ry)) / ry;
+          if (nx * nx + ny * ny <= 1.05) carve(xx, yy);
+        }
+    } else if (r.shape === 'cross') {
+      const bw = Math.max(3, Math.round(w * 0.45));
+      const bh = Math.max(3, Math.round(h * 0.45));
+      for (let yy = y; yy < y + h; yy++)
+        for (let xx = x; xx < x + w; xx++) {
+          if (Math.abs(xx - cx) <= bw / 2 || Math.abs(yy - cy) <= bh / 2) carve(xx, yy);
+        }
+    } else {
+      // Cavern: cellular automata smoothing, then keep only the pocket
+      // connected to the centre so there are never sealed-off areas.
+      let g = new Uint8Array(w * h);
+      for (let i = 0; i < g.length; i++) g[i] = rng.chance(0.58) ? 1 : 0;
+      const at = (a, xx, yy) => (xx < 0 || yy < 0 || xx >= w || yy >= h ? 0 : a[yy * w + xx]);
+      for (let it = 0; it < 4; it++) {
+        const n = new Uint8Array(w * h);
+        for (let yy = 0; yy < h; yy++)
+          for (let xx = 0; xx < w; xx++) {
+            let c = 0;
+            for (let j = -1; j <= 1; j++) for (let i = -1; i <= 1; i++) c += at(g, xx + i, yy + j);
+            n[yy * w + xx] = c >= 5 ? 1 : 0;
+          }
+        g = n;
+      }
+      const lcx = cx - x;
+      const lcy = cy - y;
+      for (let j = -1; j <= 1; j++) for (let i = -1; i <= 1; i++) g[(lcy + j) * w + lcx + i] = 1;
+      const keep = new Uint8Array(w * h);
+      const stack = [lcy * w + lcx];
+      keep[stack[0]] = 1;
+      while (stack.length) {
+        const c = stack.pop();
+        const xx = c % w;
+        const yy = (c / w) | 0;
+        for (const [nx, ny] of [
+          [xx + 1, yy],
+          [xx - 1, yy],
+          [xx, yy + 1],
+          [xx, yy - 1],
+        ]) {
+          if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+          const k = ny * w + nx;
+          if (g[k] && !keep[k]) {
+            keep[k] = 1;
+            stack.push(k);
+          }
+        }
+      }
+      for (let yy = 0; yy < h; yy++) for (let xx = 0; xx < w; xx++) if (keep[yy * w + xx]) carve(x + xx, y + yy);
+    }
   }
 
   // --- Corridors (MST via Prim + extra loops) -----------------------------
@@ -89,22 +160,23 @@ export function generateDungeon(seed, depth) {
     carve(x, y + 1);
     carve(x + 1, y + 1);
   };
-  const corridors = [];
+  const corridorTiles = new Set();
   for (const [ai, bi] of edges) {
     const a = rooms[ai];
     const b = rooms[bi];
     const horizontalFirst = rng.chance(0.5);
-    const path = [];
     let x = a.cx;
     let y = a.cy;
     const stepTo = (tx, ty) => {
       while (x !== tx) {
         x += Math.sign(tx - x);
-        path.push([x, y]);
+        carveWide(x, y);
+        corridorTiles.add(idx(x, y));
       }
       while (y !== ty) {
         y += Math.sign(ty - y);
-        path.push([x, y]);
+        carveWide(x, y);
+        corridorTiles.add(idx(x, y));
       }
     };
     if (horizontalFirst) {
@@ -114,99 +186,148 @@ export function generateDungeon(seed, depth) {
       stepTo(a.cx, b.cy);
       stepTo(b.cx, b.cy);
     }
-    for (const [px, py] of path) carveWide(px, py);
-    corridors.push(path);
   }
 
-  // --- Pillars in large rooms (never on the centre lines corridors use) ---
-  const pillars = [];
+  // --- Room roles ---------------------------------------------------------
+  const start = rooms[0];
+  start.role = 'start';
+  const field0 = bfs(tiles, W, H, start.cx, start.cy);
+  const far = (r) => field0[idx(r.cx, r.cy)];
+  let candidates = rooms.slice(1);
+  if (boss) {
+    const arenas = candidates.filter((r) => r.w >= 11 && r.h >= 11);
+    if (arenas.length) candidates = arenas;
+  }
+  let stairsRoom = candidates[0];
+  for (const r of candidates) if (far(r) > far(stairsRoom)) stairsRoom = r;
+  stairsRoom.role = boss ? 'boss' : 'stairs';
+  if (boss && stairsRoom.shape !== 'rect') {
+    stairsRoom.shape = 'rect';
+    carveRoom(stairsRoom); // only adds floor, so connectivity is preserved
+  }
+  const others = rng.shuffle(rooms.filter((r) => r.role === 'combat'));
+  if (others.length) others[0].role = 'treasure';
+  if (others.length > 3 && rng.chance(0.6)) others[1].role = 'shrine';
+  if (others.length > 4 && depth >= 2 && rng.chance(0.55)) others[2].role = 'merchant';
+  if (others.length > 6 && rng.chance(0.5)) others[3].role = 'treasure';
+
+  // --- Pillars in large rectangular rooms (never on corridor centre lines) --
   for (const r of rooms) {
-    if (r.w < 9 || r.h < 9) continue;
+    if (r.shape !== 'rect' || r.w < 9 || r.h < 9) continue;
     for (const [px, py] of [
       [r.x + 2, r.y + 2],
       [r.x + r.w - 3, r.y + 2],
       [r.x + 2, r.y + r.h - 3],
       [r.x + r.w - 3, r.y + r.h - 3],
     ]) {
+      if (corridorTiles.has(idx(px, py))) continue;
       tiles[idx(px, py)] = WALL;
-      pillars.push([px, py]);
+      if (bfs(tiles, W, H, start.cx, start.cy).some((d, i) => tiles[i] === FLOOR && d < 0)) tiles[idx(px, py)] = FLOOR;
     }
   }
 
-  // --- Walking distances from the start room ------------------------------
-  const start = rooms[0];
-  const distField = bfs(tiles, W, H, start.cx, start.cy);
-  // Safety net: if a pillar somehow sealed a pocket, remove pillars.
-  const unreachable = rooms.some((r) => distField[idx(r.cx, r.cy)] < 0);
-  if (unreachable) {
-    for (const [px, py] of pillars) tiles[idx(px, py)] = FLOOR;
-    pillars.length = 0;
-  }
-  const field = unreachable ? bfs(tiles, W, H, start.cx, start.cy) : distField;
-
-  // --- Room roles ---------------------------------------------------------
-  start.role = 'start';
-  let stairsRoom = rooms[1];
-  for (const r of rooms.slice(1)) {
-    if (field[idx(r.cx, r.cy)] > field[idx(stairsRoom.cx, stairsRoom.cy)]) stairsRoom = r;
-  }
-  stairsRoom.role = boss ? 'boss' : 'stairs';
-  const others = rng.shuffle(rooms.filter((r) => r.role === 'combat'));
-  if (others.length) others[0].role = 'treasure';
-  if (others.length > 3 && rng.chance(0.6)) others[1].role = 'shrine';
-  if (others.length > 6 && rng.chance(0.5)) others[2].role = 'treasure';
-
-  // --- Spawns, items, torches --------------------------------------------
+  // --- Spawns, items, decoration -----------------------------------------
   const pool = ENEMY_POOL.filter((e) => e.minDepth <= depth).map((e) => ({ weight: e.weight, value: e.type }));
   const spawns = [];
+  const items = [];
   const usedTiles = new Set();
-  const randomTileIn = (r, margin = 1) => {
-    for (let i = 0; i < 30; i++) {
-      const x = rng.int(r.x + margin, r.x + r.w - 1 - margin);
-      const y = rng.int(r.y + margin, r.y + r.h - 1 - margin);
-      const k = idx(x, y);
-      if (tiles[k] === FLOOR && !usedTiles.has(k)) {
-        usedTiles.add(k);
-        return { x, y };
+  const roomFloor = (r) => {
+    const out = [];
+    for (let yy = r.y; yy < r.y + r.h; yy++) for (let xx = r.x; xx < r.x + r.w; xx++) if (tiles[idx(xx, yy)] === FLOOR) out.push({ x: xx, y: yy });
+    return out;
+  };
+  const nearWall = (t) => tiles[idx(t.x + 1, t.y)] === WALL || tiles[idx(t.x - 1, t.y)] === WALL || tiles[idx(t.x, t.y + 1)] === WALL || tiles[idx(t.x, t.y - 1)] === WALL;
+  const take = (t) => {
+    const k = idx(t.x, t.y);
+    if (usedTiles.has(k)) return false;
+    usedTiles.add(k);
+    return true;
+  };
+  const randomTileIn = (r, filter = () => true) => {
+    const tilesIn = roomFloor(r).filter((t) => !usedTiles.has(idx(t.x, t.y)) && filter(t));
+    if (!tilesIn.length) return null;
+    const t = rng.pick(tilesIn);
+    take(t);
+    return t;
+  };
+  const awayFromCenter = (r) => (t) => Math.abs(t.x - r.cx) + Math.abs(t.y - r.cy) > 1;
+
+  for (const r of rooms) take({ x: r.cx, y: r.cy });
+
+  // Torches: the floor tile nearest each bounding-box corner that touches a wall.
+  const torches = [];
+  for (const r of rooms) {
+    const edge = roomFloor(r).filter(nearWall);
+    for (const [kx, ky] of [
+      [r.x, r.y],
+      [r.x + r.w - 1, r.y],
+      [r.x, r.y + r.h - 1],
+      [r.x + r.w - 1, r.y + r.h - 1],
+    ]) {
+      if (!edge.length || !rng.chance(0.8)) continue;
+      let best = edge[0];
+      for (const t of edge) if ((t.x - kx) ** 2 + (t.y - ky) ** 2 < (best.x - kx) ** 2 + (best.y - ky) ** 2) best = t;
+      if (!torches.some((t) => t.x === best.x && t.y === best.y)) {
+        torches.push(best);
+        take(best);
       }
     }
-    return null;
-  };
+  }
 
-  usedTiles.add(idx(stairsRoom.cx, stairsRoom.cy));
-  const items = [];
+
+  const traps = [];
+  const urns = [];
+  const decor = [];
   for (const r of rooms) {
-    if (r.role === 'start') continue;
     if (r.role === 'boss') {
       const by = Math.max(r.y + 1, r.cy - 3);
       const pos = tiles[idx(r.cx, by)] === FLOOR ? { x: r.cx, y: by } : randomTileIn(r) || { x: r.cx, y: r.cy + 1 };
       spawns.push({ type: 'boss', x: pos.x, y: pos.y });
       continue;
     }
-    const base = r.role === "shrine" ? 0 : rng.int(1, 3) + Math.floor(depth / 2);
-    const area = (r.w * r.h) / 60;
-    const count = Math.round(base * Math.min(1.6, Math.max(0.7, area)));
-    for (let i = 0; i < count; i++) {
-      const t = randomTileIn(r);
-      if (t) spawns.push({ type: rng.weighted(pool), x: t.x, y: t.y, elite: depth >= 3 && rng.chance(0.06 + depth * 0.01) });
+    if (r.role !== 'start') {
+      const peaceful = r.role === 'shrine' || r.role === 'merchant';
+      const base = peaceful ? 0 : rng.int(1, 3) + Math.floor(depth / 2);
+      const area = (r.w * r.h) / 60;
+      const count = Math.round(base * Math.min(1.6, Math.max(0.7, area)));
+      for (let i = 0; i < count; i++) {
+        const t = randomTileIn(r, awayFromCenter(r));
+        if (t) spawns.push({ type: rng.weighted(pool), x: t.x, y: t.y, elite: depth >= 3 && rng.chance(0.06 + depth * 0.01) });
+      }
+      if (r.role === 'treasure') items.push({ kind: 'chest', x: r.cx, y: r.cy });
+      if (r.role === 'shrine') items.push({ kind: 'shrine', x: r.cx, y: r.cy });
+      if (r.role === 'merchant') items.push({ kind: 'merchant', x: r.cx, y: r.cy });
+      if (r.role === 'combat' && rng.chance(0.2)) {
+        const t = randomTileIn(r);
+        if (t) items.push({ kind: 'potion', x: t.x, y: t.y });
+      }
+      // spike traps: a short strip across part of the room
+      if (r.role === 'combat' && depth >= 2 && rng.chance(0.35)) {
+        const horizontal = rng.chance(0.5);
+        const len = rng.int(2, 4);
+        const sx = horizontal ? rng.int(r.x + 1, Math.max(r.x + 1, r.x + r.w - 1 - len)) : rng.int(r.x + 1, r.x + r.w - 2);
+        const sy = horizontal ? rng.int(r.y + 1, r.y + r.h - 2) : rng.int(r.y + 1, Math.max(r.y + 1, r.y + r.h - 1 - len));
+        const phase = rng.next();
+        for (let i = 0; i < len; i++) {
+          const t = { x: sx + (horizontal ? i : 0), y: sy + (horizontal ? 0 : i) };
+          if (tiles[idx(t.x, t.y)] === FLOOR && take(t)) traps.push({ ...t, phase });
+        }
+      }
     }
-    if (r.role === 'treasure') items.push({ kind: 'chest', x: r.cx, y: r.cy });
-    if (r.role === 'shrine') items.push({ kind: 'shrine', x: r.cx, y: r.cy });
-    if (r.role === 'combat' && rng.chance(0.25)) {
-      const t = randomTileIn(r);
-      if (t) items.push({ kind: 'potion', x: t.x, y: t.y });
+    // breakable urns hug the walls; scattered bones and rubble add texture
+    const urnCount = r.role === 'start' ? 0 : rng.int(0, 3);
+    for (let i = 0; i < urnCount; i++) {
+      const t = randomTileIn(r, nearWall);
+      if (t) urns.push(t);
     }
-  }
-
-  const torches = [];
-  for (const r of rooms) {
-    const corners = [
-      [r.x, r.y],
-      [r.x + r.w - 1, r.y],
-      [r.x, r.y + r.h - 1],
-      [r.x + r.w - 1, r.y + r.h - 1],
-    ];
-    for (const [x, y] of corners) if (tiles[idx(x, y)] === FLOOR && rng.chance(0.8)) torches.push({ x, y });
+    const decorCount = rng.int(1, 4);
+    for (let i = 0; i < decorCount; i++) {
+      const t = roomFloor(r).filter((q) => !usedTiles.has(idx(q.x, q.y)));
+      if (t.length) {
+        const q = rng.pick(t);
+        decor.push({ x: q.x, y: q.y, kind: rng.pick(['bones', 'rubble', 'rubble', 'skull']), ox: rng.range(-0.6, 0.6), oy: rng.range(-0.6, 0.6), rot: rng.range(0, Math.PI * 2) });
+      }
+    }
   }
 
   return {
@@ -216,13 +337,15 @@ export function generateDungeon(seed, depth) {
     height: H,
     tiles,
     rooms,
-    corridors,
     start: { x: start.cx, y: start.cy },
     stairs: { x: stairsRoom.cx, y: stairsRoom.cy },
     boss,
     spawns,
     items,
     torches,
+    traps,
+    urns,
+    decor,
   };
 }
 

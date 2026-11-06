@@ -34,7 +34,7 @@ export class UI {
       bolt: $('ab-bolt').querySelector('i'),
       dash: $('ab-dash').querySelector('i'),
     };
-    this.screens = ['menu', 'armory', 'controls', 'perks', 'pause', 'death'].reduce((o, id) => ((o[id] = $(id)), o), {});
+    this.screens = ['menu', 'armory', 'controls', 'perks', 'shop', 'pause', 'death'].reduce((o, id) => ((o[id] = $(id)), o), {});
     this.mm = this.el.minimap.getContext('2d');
     this.mmLarge = false;
     this._toastTimer = 0;
@@ -167,7 +167,7 @@ export class UI {
     for (const it of game.interactables) {
       if (it.used || it.kind === 'stairs') continue;
       const [tx, ty] = w.toTile(it.x, it.z);
-      if (w.explored[ty * w.W + tx]) dot(tx, ty, it.kind === 'chest' ? '#f0c860' : '#6aff9a', Math.max(2.5, cell * 0.8));
+      if (w.explored[ty * w.W + tx]) dot(tx, ty, { chest: '#f0c860', shrine: '#6aff9a', merchant: '#c08aff' }[it.kind], Math.max(2.5, cell * 0.8));
     }
     for (const e of game.enemies) {
       if (!e.awake) continue;
@@ -192,6 +192,25 @@ export class UI {
       wrap.appendChild(c);
     });
     this.show('perks');
+  }
+
+  renderShop(gold, offers, onBuy) {
+    $('shop-gold').textContent = `◈ ${gold}`;
+    const list = $('shop-items');
+    list.innerHTML = '';
+    offers.forEach((o) => {
+      const c = document.createElement('div');
+      c.className = 'perk shop-item';
+      c.innerHTML = `<div class="icon"></div><h3></h3><p></p><button></button>`;
+      c.querySelector('.icon').textContent = o.icon;
+      c.querySelector('h3').textContent = o.name;
+      c.querySelector('p').textContent = o.desc;
+      const b = c.querySelector('button');
+      b.textContent = o.ok ? `Buy · ◈ ${o.cost}` : 'Not needed';
+      b.disabled = !o.ok || gold < o.cost;
+      b.addEventListener('click', () => onBuy(o));
+      list.appendChild(c);
+    });
   }
 
   renderMenuStats(save) {

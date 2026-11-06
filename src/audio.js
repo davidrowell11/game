@@ -89,6 +89,17 @@ export const sfx = {
   },
   chest: () => [392, 523, 659, 784, 988].forEach((f, i) => tone({ type: 'triangle', f0: f, dur: 0.18, gain: 0.1, delay: i * 0.06 })),
   stairs: () => [300, 250, 200, 150].forEach((f, i) => tone({ type: 'sine', f0: f, f1: f * 0.7, dur: 0.3, gain: 0.12, delay: i * 0.1 })),
+  fuse: () => tone({ type: 'square', f0: 1400, dur: 0.05, gain: 0.06 }),
+  boom: () => {
+    noise({ dur: 0.6, gain: 0.45, freq: 260, type: 'lowpass' });
+    tone({ type: 'sine', f0: 120, f1: 30, dur: 0.5, gain: 0.3 });
+  },
+  shatter: () => {
+    noise({ dur: 0.18, gain: 0.25, freq: 3200, q: 2 });
+    tone({ type: 'triangle', f0: 900, f1: 500, dur: 0.1, gain: 0.05 });
+  },
+  spike: () => noise({ dur: 0.08, gain: 0.12, freq: 4200, q: 3 }),
+  buy: () => [880, 1320].forEach((f, i) => tone({ type: 'square', f0: f, dur: 0.08, gain: 0.06, delay: i * 0.07 })),
   windup: () => tone({ type: 'sawtooth', f0: 90, f1: 160, dur: 0.3, gain: 0.05 }),
   roar: () => {
     tone({ type: 'sawtooth', f0: 70, f1: 40, dur: 1.0, gain: 0.25 });
