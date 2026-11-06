@@ -64,15 +64,42 @@ jobs:
           if-no-files-found: error
 
   release:
-    if: startsWith(github.ref, 'refs/tags/v')
+    # Publishes a GitHub Release named after the version in package.json
+    # (e.g. v1.0.0). Pushing to main again updates that release's files;
+    # bump "version" in package.json to publish a new release.
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     needs: package
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+      - id: version
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=v$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+          fi
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
           merge-multiple: true
       - uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: Depthwarden ${{ steps.version.outputs.tag }}
+          target_commitish: ${{ github.sha }}
           files: artifacts/*
-          generate_release_notes: true
+          overwrite_files: true
+          make_latest: true
+          body: |
+            **Download the file for your computer:**
+
+            | Computer | File |
+            | --- | --- |
+            | Windows 10/11 | `Depthwarden-*-win-x64.exe` (installer) or `Depthwarden-*-windows-portable.exe` |
+            | Mac, Apple Silicon (M1/M2/M3/M4) | `Depthwarden-*-mac-arm64.dmg` |
+            | Mac, Intel | `Depthwarden-*-mac-x64.dmg` |
+            | Linux | `Depthwarden-*-linux-x86_64.AppImage` |
+
+            Step-by-step install instructions (including the first-launch security prompts) are in the [README](https://github.com/davidrowell11/game#install).

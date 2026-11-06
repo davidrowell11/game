@@ -149,14 +149,7 @@ The installers are written to the `release/` folder.
 
 ### Automatic builds and releases
 
-The GitHub Actions workflow in `.github/workflows/build.yml` builds the Windows, macOS and Linux installers on every push to `main`. To publish a new version on the Releases page, update `version` in `package.json`, then tag and push:
-
-```bash
-git tag v1.0.1
-```
-```bash
-git push origin v1.0.1
-```
+The GitHub Actions workflow (`.github/workflows/build.yml`) builds the Windows, macOS and Linux installers on every push to `main`. It then publishes them to a release named after the `version` in `package.json` (for example `v1.0.0`). Later pushes refresh that release's files. To publish a new version, change `version` in `package.json` (for example to `1.0.1`) and push to `main`.
 
 ---
 
