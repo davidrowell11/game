@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:" />
+    <title>Depthwarden</title>
+    <link rel="stylesheet" href="./src/style.css" />
+  </head>
+  <body>
+    <div id="app">
+      <canvas id="view"></canvas>
+
+      <div id="hud" class="hidden">
+        <div id="vitals">
+          <div class="bar hp"><div id="hp-fill" class="fill"></div><span id="hp-text"></span></div>
+          <div class="bar xp"><div id="xp-fill" class="fill"></div><span id="xp-text"></span></div>
+          <div id="stats-line"><span id="level">Lv 1</span><span id="gold">◈ 0</span><span id="kills">☠ 0</span></div>
+        </div>
+        <div id="floor-label"></div>
+        <canvas id="minimap" width="200" height="200"></canvas>
+        <div id="abilities">
+          <div class="ability" id="ab-swing"><b>LMB</b><span>Sword</span><i></i></div>
+          <div class="ability" id="ab-bolt"><b>RMB</b><span>Bolt</span><i></i></div>
+          <div class="ability" id="ab-dash"><b>SPACE</b><span>Dash</span><i></i></div>
+          <div class="ability" id="ab-potion"><b>Q</b><span>Potion <em id="potion-count">1</em></span><i></i></div>
+        </div>
+        <div id="boss-bar" class="hidden"><div id="boss-name"></div><div class="bar"><div id="boss-fill" class="fill"></div></div></div>
+        <div id="prompt" class="hidden"></div>
+        <div id="perk-list"></div>
+      </div>
+
+      <div id="vignette"></div>
+      <div id="dmg-layer"></div>
+      <div id="banner" class="hidden"><h2 id="banner-title"></h2><p id="banner-sub"></p></div>
+      <div id="toast"></div>
+
+      <div id="menu" class="screen">
+        <h1>DEPTHWARDEN</h1>
+        <p class="tagline">Descend. Die. Grow stronger. Descend again.</p>
+        <div class="menu-buttons">
+          <button id="btn-start" class="primary">Begin Descent</button>
+          <button id="btn-armory">Armory</button>
+          <button id="btn-controls">Controls</button>
+          <button id="btn-quit" class="desktop-only">Quit</button>
+        </div>
+        <label class="seed">Seed <input id="seed-input" placeholder="random" maxlength="24" /></label>
+        <div id="menu-stats"></div>
+      </div>
+
+      <div id="armory" class="screen hidden">
+        <h2>Armory</h2>
+        <p class="sub">Gold you carry out of the depths is banked here. Upgrades are permanent.</p>
+        <div id="armory-gold"></div>
+        <div id="armory-list"></div>
+        <button class="back">Back</button>
+      </div>
+
+      <div id="controls" class="screen hidden">
+        <h2>Controls</h2>
+        <table>
+          <tr><td>WASD / Arrows</td><td>Move</td></tr>
+          <tr><td>Mouse</td><td>Aim</td></tr>
+          <tr><td>Left mouse (hold)</td><td>Sword sweep (also deflects projectiles)</td></tr>
+          <tr><td>Right mouse (hold)</td><td>Arcane bolt</td></tr>
+          <tr><td>Space / Shift</td><td>Dash (invulnerable while dashing)</td></tr>
+          <tr><td>E</td><td>Interact: chests, shrines, stairs</td></tr>
+          <tr><td>Q</td><td>Drink potion</td></tr>
+          <tr><td>Tab</td><td>Toggle large map</td></tr>
+          <tr><td>Esc / P</td><td>Pause</td></tr>
+          <tr><td>F11</td><td>Fullscreen</td></tr>
+        </table>
+        <p class="sub">Every floor is procedurally generated. A guardian waits every 4th floor. Defeat the guardian of floor 12 to win.</p>
+        <button class="back">Back</button>
+      </div>
+
+      <div id="perks" class="screen hidden overlay">
+        <h2 id="perks-title">Level Up!</h2>
+        <p class="sub">Choose a boon (1, 2, 3)</p>
+        <div id="perk-cards"></div>
+      </div>
+
+      <div id="pause" class="screen hidden overlay">
+        <h2>Paused</h2>
+        <div class="menu-buttons">
+          <button id="btn-resume" class="primary">Resume</button>
+          <label class="volume">Volume <input id="volume" type="range" min="0" max="1" step="0.05" /></label>
+          <button id="btn-abandon">Abandon Run</button>
+        </div>
+      </div>
+
+      <div id="death" class="screen hidden overlay">
+        <h2 id="death-title">You Have Fallen</h2>
+        <div id="death-stats"></div>
+        <div class="menu-buttons">
+          <button id="btn-retry" class="primary">Descend Again</button>
+          <button id="btn-menu">Main Menu</button>
+        </div>
+      </div>
+    </div>
+    <script type="module" src="./src/main.js"></script>
+  </body>
+</html>
