@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import { generateDungeon, isBossFloor, FINAL_DEPTH } from './dungeon.js';
 import { hashSeed } from './rng.js';
-import { World, tileCenter, themeFor } from './world.js';
+import { World, tileCenter, themeFor, disposeTree } from './world.js';
+import { Renderer } from './render.js';
 import { Player, xpForLevel } from './player.js';
 import { Enemy, ENEMY_DEFS } from './enemies.js';
 import { Effects, Projectiles, Pickups, DamageNumbers } from './effects.js';
@@ -9,10 +10,11 @@ import { PERKS, rollPerks } from './perks.js';
 import { UI } from './ui.js';
 import { loadSave, writeSave } from './save.js';
 import { sfx, unlockAudio, setVolume, startDrone } from './audio.js';
-import { glowTexture } from './textures.js';
-import { makeTrap, makeUrn, makeMerchant, trapState, TRAP_PERIOD } from './props.js';
+import { makeTrap, makeUrn, makeMerchant, makePortal, setPortalColor, makeChest, makeShrine, trapState, TRAP_PERIOD } from './props.js';
 
 const CAM_OFFSET = new THREE.Vector3(0, 19, 12.5);
+const _v2 = new THREE.Vector2();
+const _v3 = new THREE.Vector3();
 
 class Input {
   constructor(canvas) {
@@ -58,13 +60,10 @@ class Input {
 export class Game {
   constructor() {
     this.canvas = document.getElementById('view');
-    this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true, powerPreference: 'high-performance' });
-    this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.15;
     this.scene = new THREE.Scene();
-    this.camera = new THREE.PerspectiveCamera(48, 1, 0.1, 200);
-    this.hemi = new THREE.HemisphereLight(0x3a4a6a, 0x120c08, 0.9);
+    this.camera = new THREE.PerspectiveCamera(46, 1, 0.1, 200);
+    this.renderer = new Renderer(this.canvas, this.scene, this.camera);
+    this.hemi = new THREE.HemisphereLight(0x3a4a6a, 0x120c08, 1.15);
     this.scene.add(this.hemi);
 
     this.input = new Input(this.canvas);
@@ -81,6 +80,12 @@ export class Game {
     this.time = 0;
     this.save = loadSave();
     setVolume(this.save.volume);
+    this.settings = this.save.settings;
+    this.renderer.setQuality(this.settings.quality);
+    this.numbers.enabled = this.settings.damageNumbers;
+    this.timers = []; // game-time timers (never wall-clock setTimeout)
+    this.simTime = 0;
+    this.fadeEl = document.getElementById('fade');
     this.perkById = Object.fromEntries(PERKS.map((p) => [p.id, p]));
     this.enemies = [];
     this.interactables = [];
@@ -89,6 +94,8 @@ export class Game {
     this.dying = [];
     this.blasts = [];
     this.hitStop = 0;
+    this._frozenFrames = 0;
+    this.deathDelay = 0;
     this.state = 'menu';
     this.world = null;
     this.player = null;
@@ -96,6 +103,7 @@ export class Game {
     this._bindUI();
     this._resize();
     addEventListener('resize', () => this._resize());
+    matchMedia?.('(resolution: 1dppx)')?.addEventListener?.('change', () => this._resize());
     addEventListener('blur', () => this.state === 'playing' && this.pause());
     document.addEventListener('visibilitychange', () => document.hidden && this.state === 'playing' && this.pause());
     this.toMenu();
@@ -114,6 +122,8 @@ export class Game {
     on('btn-start', () => this.startRun(document.getElementById('seed-input').value.trim()));
     on('btn-armory', () => this.openArmory());
     on('btn-controls', () => this.ui.show('controls'));
+    on('btn-settings', () => this.openSettings('menu'));
+    on('btn-pause-settings', () => this.openSettings('pause'));
     on('btn-resume', () => this.resume());
     on('btn-leave-shop', () => this.closeShop());
     on('btn-abandon', () => {
@@ -136,16 +146,27 @@ export class Game {
     for (const b of document.querySelectorAll('.screen .back'))
       b.addEventListener('click', () => {
         sfx.click();
-        this.toMenu();
+        if (this.settingsFrom === 'pause' && b.closest('#settings')) {
+          this.settingsFrom = null;
+          this.ui.show('pause');
+          return;
+        }
+        this.settingsFrom = null;
+        this.ui.show('menu');
+        this.ui.renderMenuStats(this.save);
       });
     const quit = document.getElementById('btn-quit');
     if (window.depthwarden?.quit) quit.addEventListener('click', () => window.depthwarden.quit());
     else quit.classList.add('hidden');
-    const vol = document.getElementById('volume');
-    vol.value = this.save.volume;
-    vol.addEventListener('input', () => {
-      this.save.volume = Number(vol.value);
-      setVolume(this.save.volume);
+    this.ui.bindSettings(this.save, (key, value) => {
+      if (key === 'volume') {
+        this.save.volume = value;
+        setVolume(value);
+      } else {
+        this.settings[key] = value;
+        if (key === 'quality') this._applyQuality();
+        if (key === 'damageNumbers') this.numbers.enabled = value;
+      }
       writeSave(this.save);
     });
     addEventListener('keydown', (e) => {
@@ -155,16 +176,31 @@ export class Game {
         else document.documentElement.requestFullscreen?.();
       }
       if (this.state === 'perks' && ['Digit1', 'Digit2', 'Digit3'].includes(e.code)) {
-        const cards = document.querySelectorAll('#perk-cards .perk');
+        const cards = document.querySelectorAll('#perk-cards .card');
         cards[Number(e.code.slice(-1)) - 1]?.click();
       }
     });
   }
 
+  openSettings(from) {
+    this.settingsFrom = from;
+    this.ui.syncSettings(this.save);
+    this.ui.show('settings');
+  }
+
+  _applyQuality() {
+    const q = this.settings.quality;
+    this.renderer.setQuality(q);
+    this.player?.setShadows(q === 'high');
+    this._frozenFrames = 0;
+    // particle budgets are chosen when a floor is built; rebuild the backdrop
+    if (this.state === 'menu') this._buildMenuWorld();
+  }
+
   _resize() {
     const w = innerWidth;
     const h = innerHeight;
-    this.renderer.setSize(w, h, false);
+    this.renderer.resize(w, h); // also re-reads devicePixelRatio
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
     this.vw = w;
@@ -173,6 +209,7 @@ export class Game {
 
   // ---------------------------------------------------------------- flow
   toMenu() {
+    this.closeLargeMap();
     this.state = 'menu';
     this.victory = false;
     this.ui.setHud(false);
@@ -183,10 +220,16 @@ export class Game {
       this.player.dispose();
       this.player = null;
     }
-    // A slowly orbiting fly-over of a random dungeon as the menu backdrop.
+    this.fadeEl.style.opacity = '0';
+    this._buildMenuWorld();
+  }
+
+  // A slowly orbiting fly-over of a random dungeon as the menu backdrop.
+  _buildMenuWorld() {
+    if (this.world) this.world.dispose();
     const d = generateDungeon((Math.random() * 1e9) | 0, 1 + ((Math.random() * 12) | 0));
     this._applyTheme(d.depth);
-    this.world = new World(this.scene, d);
+    this.world = new World(this.scene, d, { quality: this.settings.quality });
     this.world.explored.fill(1);
     const c = tileCenter(d.start.x, d.start.y);
     this.menuCenter = new THREE.Vector3(c.x, 0, c.z);
@@ -213,9 +256,11 @@ export class Game {
     this.runSeed = hashSeed(this.runSeedText);
     this.runEnded = false;
     this.victory = false;
-    this.runStart = this.time;
+    this.simTime = 0;
+    this.timers = [];
     if (this.player) this.player.dispose();
     this.player = new Player(this.scene, this.save);
+    this.player.setShadows(this.settings.quality === 'high');
     this.pendingLevels = 0;
     this.pendingChests = 0;
     this.ui.hideAll();
@@ -227,7 +272,7 @@ export class Game {
   _applyTheme(depth) {
     const th = themeFor(depth);
     this.scene.background = new THREE.Color(th.bg);
-    this.scene.fog = new THREE.Fog(th.bg, 24, 46);
+    this.scene.fog = new THREE.FogExp2(th.bg, 0.024);
     this.hemi.color.set(th.hemi[0]);
     this.hemi.groundColor.set(th.hemi[1]);
   }
@@ -235,15 +280,21 @@ export class Game {
   _clearFloor() {
     if (this.world) this.world.dispose();
     this.world = null;
-    for (const e of this.enemies) this.scene.remove(e.mesh);
+    // remove AND free GPU resources (shared/cached ones are skipped)
+    const drop = (o) => {
+      this.scene.remove(o.mesh);
+      disposeTree(o.mesh);
+    };
+    this.enemies.forEach(drop);
     this.enemies = [];
-    for (const it of this.interactables) this.scene.remove(it.mesh);
+    this.interactables.forEach(drop);
     this.interactables = [];
-    for (const o of [...this.traps, ...this.urns, ...this.dying]) this.scene.remove(o.mesh);
+    [...this.traps, ...this.urns, ...this.dying].forEach(drop);
     this.traps = [];
     this.urns = [];
     this.dying = [];
     this.blasts = [];
+    this.timers = this.timers.filter((t) => t.persist);
     this.projectiles.clear();
     this.pickups.clear();
     this.fx.clear();
@@ -257,7 +308,7 @@ export class Game {
     const d = generateDungeon(hashSeed(`${this.runSeed}:${depth}`), depth);
     this.dungeon = d;
     this._applyTheme(depth);
-    this.world = new World(this.scene, d);
+    this.world = new World(this.scene, d, { quality: this.settings.quality });
     const s = tileCenter(d.start.x, d.start.y);
     this.player.pos.set(s.x, 0, s.z);
     this.camTarget.copy(this.player.pos);
@@ -292,67 +343,35 @@ export class Game {
     this.world.computeFlow(this.player.pos.x, this.player.pos.z);
     this.world.reveal(this.player.pos.x, this.player.pos.z);
     const th = themeFor(depth);
-    this.ui.el.floor.textContent = `Floor ${depth} · ${th.name} · Seed ${this.runSeedText}`;
-    this.ui.banner(d.boss ? `Floor ${depth} — Guardian` : `Floor ${depth}`, th.name);
+    this.ui.setFloor(d.boss ? `Floor ${depth} · Guardian` : `Floor ${depth}`, `${th.name} · Seed ${this.runSeedText}`);
+    this.ui.banner(d.boss ? `The Guardian's Lair` : `Floor ${depth}`, d.boss ? `Floor ${depth} · ${th.name}` : th.name);
     if (this.ui.mmLarge) this.ui.toggleMap();
+    this.ui.drawMinimap(this);
   }
 
   _makeInteractable(kind, x, z) {
     const g = new THREE.Group();
     g.position.set(x, 0, z);
     const it = { kind, x, z, mesh: g, used: false };
+    const w = this.world;
     if (kind === 'stairs') {
-      const pit = new THREE.Mesh(new THREE.CircleGeometry(1.3, 32), new THREE.MeshBasicMaterial({ color: 0x000000 }));
-      pit.rotation.x = -Math.PI / 2;
-      pit.position.y = 0.02;
-      it.ringMat = new THREE.MeshBasicMaterial({ color: 0x5ad8ff });
-      it.ring = new THREE.Mesh(new THREE.TorusGeometry(1.35, 0.1, 8, 40), it.ringMat);
-      it.ring.rotation.x = -Math.PI / 2;
-      it.ring.position.y = 0.1;
-      it.ring2 = new THREE.Mesh(new THREE.TorusGeometry(0.9, 0.05, 6, 32), it.ringMat);
-      it.ring2.rotation.x = -Math.PI / 2;
-      it.ring2.position.y = 0.6;
-      it.light = new THREE.PointLight(0x5ad8ff, 10, 9, 1.4);
-      it.light.position.y = 1.2;
-      const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTexture(), color: 0x5ad8ff, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
-      glow.scale.setScalar(3.5);
-      glow.position.y = 0.4;
-      it.glow = glow;
-      g.add(pit, it.ring, it.ring2, it.light, glow);
+      it.portal = makePortal();
+      g.add(it.portal.mesh);
+      it.emitter = w.addEmitter({ x, z, y: 1.4, color: 0x5ad8ff, intensity: 18, distance: 11, priority: 6 });
     } else if (kind === 'chest') {
-      const wood = new THREE.MeshStandardMaterial({ color: 0x7a4a24, roughness: 0.8 });
-      const trim = new THREE.MeshStandardMaterial({ color: 0xe8b84a, metalness: 0.9, roughness: 0.3, emissive: 0x2a1a00 });
-      const base = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.6, 0.75), wood);
-      base.position.y = 0.3;
-      const band = new THREE.Mesh(new THREE.BoxGeometry(1.14, 0.1, 0.79), trim);
-      band.position.y = 0.55;
-      it.lid = new THREE.Group();
-      it.lid.position.set(0, 0.6, -0.375);
-      const lid = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.25, 0.75), wood);
-      lid.position.set(0, 0.125, 0.375);
-      const lock = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.2, 0.06), trim);
-      lock.position.set(0, 0, 0.77);
-      it.lid.add(lid, lock);
-      it.light = new THREE.PointLight(0xffc860, 4, 5, 1.5);
-      it.light.position.y = 1.3;
-      g.add(base, band, it.lid, it.light);
+      const c = makeChest();
+      it.lid = c.lid;
+      g.add(c.mesh);
+      it.emitter = w.addEmitter({ x, z, y: 1.4, color: 0xffc860, intensity: 6, distance: 6, priority: 2 });
     } else if (kind === 'merchant') {
       g.add(makeMerchant());
-      it.light = new THREE.PointLight(0xffc88a, 9, 9, 1.4);
-      it.light.position.set(0.5, 1.8, 0);
-      g.add(it.light);
+      it.emitter = w.addEmitter({ x: x + 0.5, z, y: 1.9, color: 0xffc88a, intensity: 14, distance: 9, priority: 4, flicker: 1 });
     } else if (kind === 'shrine') {
-      const stone = new THREE.MeshStandardMaterial({ color: 0x8a8a90, roughness: 0.9 });
-      const base = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 1.1, 0.5, 10), stone);
-      base.position.y = 0.25;
-      const pillar = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.3, 1.0, 8), stone);
-      pillar.position.y = 1.0;
-      it.orbMat = new THREE.MeshBasicMaterial({ color: 0x6aff9a });
-      it.orb = new THREE.Mesh(new THREE.IcosahedronGeometry(0.32, 1), it.orbMat);
-      it.orb.position.y = 1.85;
-      it.light = new THREE.PointLight(0x6aff9a, 8, 9, 1.4);
-      it.light.position.y = 2;
-      g.add(base, pillar, it.orb, it.light);
+      const sh = makeShrine();
+      it.orb = sh.orb;
+      it.orbMat = sh.orbMat;
+      g.add(sh.mesh);
+      it.emitter = w.addEmitter({ x, z, y: 2.2, color: 0x6aff9a, intensity: 12, distance: 9, priority: 4 });
     }
     this.scene.add(g);
     this.interactables.push(it);
@@ -361,12 +380,33 @@ export class Game {
 
   _updateStairsLook() {
     const c = this.stairsLocked ? 0xff3a5a : 0x5ad8ff;
-    this.stairs.ringMat.color.set(c);
-    this.stairs.light.color.set(c);
-    this.stairs.glow.material.color.set(c);
+    setPortalColor(this.stairs.portal, c);
+    this.stairs.emitter.color.set(c);
+  }
+
+  // Game-time timer: advances only while the simulation runs, and is dropped
+  // when the floor or run is torn down (unlike setTimeout).
+  after(seconds, fn) {
+    this.timers.push({ t: seconds, fn });
+  }
+
+  _tickTimers(dt) {
+    for (let i = this.timers.length - 1; i >= 0; i--) {
+      const t = this.timers[i];
+      t.t -= dt;
+      if (t.t <= 0) {
+        this.timers.splice(i, 1);
+        t.fn();
+      }
+    }
+  }
+
+  closeLargeMap() {
+    if (this.ui.mmLarge) this.ui.toggleMap();
   }
 
   pause() {
+    this.closeLargeMap();
     this.state = 'paused';
     this.ui.show('pause');
   }
@@ -388,18 +428,19 @@ export class Game {
 
   _runRows() {
     const p = this.player;
-    const secs = Math.floor(this.time - this.runStart);
+    const secs = Math.floor(this.simTime);
     return [
       ['Floor reached', this.depth],
       ['Level', p.level],
       ['Enemies slain', p.kills],
-      ['Gold', `◈ ${p.gold}`],
+      ['Gold', p.gold],
       ['Time', `${Math.floor(secs / 60)}m ${secs % 60}s`],
       ['Seed', this.runSeedText],
     ];
   }
 
   die() {
+    this.closeLargeMap();
     this.player.dead = true;
     this.state = 'dead';
     sfx.death();
@@ -407,16 +448,19 @@ export class Game {
     this.player.mesh.visible = false;
     this.endRun();
     document.getElementById('btn-retry').textContent = 'Descend Again';
-    setTimeout(() => this.ui.showDeath('You Have Fallen', [...this._runRows(), ['Gold banked', `◈ ${this.player.gold}`]]), 1200);
+    this.deathDelay = 1.4; // show the death screen once the death effect has played
+    this.renderer.fx.hurt = 1;
   }
 
   win() {
+    if (this.player.dead || this.state === 'menu') return;
     this.victory = true;
+    this.deathDelay = 0;
     this.save.wins += 1;
     writeSave(this.save);
     this.state = 'dead';
     document.getElementById('btn-retry').textContent = 'Keep Descending (endless)';
-    this.ui.showDeath('Victory! The Depths Are Sealed', this._runRows());
+    this.ui.showDeath('The Depths Are Sealed', this._runRows(), true);
   }
 
   // ---------------------------------------------------------------- combat api
@@ -425,6 +469,7 @@ export class Game {
     const e = new Enemy(type, x, z, this.depth || 1, elite);
     this.scene.add(e.mesh);
     this.enemies.push(e);
+    if (e.lightSpec) e.emitter = this.world.addEmitter({ ...e.lightSpec, x, z, follow: e.mesh });
     if (awake) {
       e.awake = true;
       this.fx.burst(x, 0.3, z, 0x8a6aff, 10, 3);
@@ -445,6 +490,7 @@ export class Game {
   }
 
   shake(n) {
+    if (!this.settings.screenShake) return;
     this.shakeAmt = Math.max(this.shakeAmt, n);
   }
 
@@ -456,6 +502,7 @@ export class Game {
 
   damageEnemy(e, amount, crit, kx = 0, kz = 0) {
     if (e.dead) return;
+    const dealt = Math.min(amount, Math.max(0, e.hp)); // overkill doesn't count for lifesteal
     e.hp -= amount;
     e.flash = 0.09;
     e.wake(this);
@@ -467,7 +514,7 @@ export class Game {
     if (crit) sfx.crit();
     else sfx.hit();
     const ls = this.player.stats.lifesteal;
-    if (ls > 0) this.player.heal(amount * ls);
+    if (ls > 0) this.player.heal(dealt * ls);
     if (e.hp <= 0) this.killEnemy(e);
   }
 
@@ -478,6 +525,7 @@ export class Game {
     if (i >= 0) this.enemies.splice(i, 1);
     e.mat.emissive.setRGB(1, 1, 1);
     this.dying.push({ mesh: e.mesh, t: 0, s: e.mesh.scale.x });
+    if (e.emitter) this.world.removeEmitter(e.emitter);
     if (selfDestruct) return; // a Bloater that blew itself up gives no reward
     if (e.type === 'bloater' && !e.exploded) {
       e.exploded = true;
@@ -505,7 +553,7 @@ export class Game {
       this.ui.toast('The way down is open');
       this.shake(0.8);
       this.pendingChests += 1; // a guaranteed boon for the kill
-      if (this.depth === FINAL_DEPTH) setTimeout(() => this.state !== 'menu' && this.win(), 1800);
+      if (this.depth === FINAL_DEPTH) this.after(1.8, () => this.win());
     } else if (Math.random() < goldChance) {
       const n = 1 + ((Math.random() * 2) | 0);
       for (let i = 0; i < n; i++) this.pickups.spawn('gold', e.pos.x, e.pos.z, Math.max(1, Math.round((1 + this.depth * 0.5) * goldMul)));
@@ -548,10 +596,10 @@ export class Game {
     const d = this.depth;
     const render = () => {
       const offers = [
-        { icon: '⚗', name: 'Healing Draught', desc: '+1 potion (carry up to 5)', cost: 12 + 3 * d, ok: p.potions < 5, buy: () => (p.potions += 1) },
-        { icon: '♥', name: 'Full Restore', desc: 'Heal to full health', cost: 18 + 5 * d, ok: p.hp < p.stats.maxHp, buy: () => (p.hp = p.stats.maxHp) },
+        { icon: 'flask', name: 'Healing Draught', desc: '+1 potion (carry up to 5)', cost: 12 + 3 * d, ok: p.potions < 5, buy: () => (p.potions += 1) },
+        { icon: 'heart', name: 'Full Restore', desc: 'Heal to full health', cost: 18 + 5 * d, ok: p.hp < p.stats.maxHp, buy: () => (p.hp = p.stats.maxHp) },
         {
-          icon: '✦',
+          icon: 'star',
           name: 'Mystery Boon',
           desc: 'Choose 1 of 3 perks',
           cost: Math.round((35 + 10 * d) * (1 + 0.6 * this.merchantBoons)),
@@ -613,6 +661,7 @@ export class Game {
     p.hp -= dmg;
     p.invuln = 0.5;
     p.hurtFlash = 0.25;
+    this.renderer.fx.hurt = Math.min(1, 0.35 + dmg / p.stats.maxHp * 3);
     this.shake(0.3);
     sfx.hurt();
     this.numbers.spawn(p.pos.x, 2.2, p.pos.z, `-${dmg}`, 'hurt');
@@ -651,12 +700,13 @@ export class Game {
     this.state = 'perks';
     const choices = rollPerks(this.player.taken, 3);
     this.ui.showPerks(title, choices, (perk) => {
+      if (this.state !== 'perks') return; // ignore double clicks
       sfx.click();
       perk.apply(this.player.stats, this.player);
       this.player.taken[perk.id] = (this.player.taken[perk.id] || 0) + 1;
       this.ui.hideAll();
       this.state = 'playing';
-    });
+    }, this.player.taken);
   }
 
   // ---------------------------------------------------------------- frame
@@ -665,6 +715,7 @@ export class Game {
     this._last = now;
     this.time += dt;
     const state = this.state;
+    let render = true;
     if (state === 'menu') this._updateMenu(dt);
     else if (state === 'playing') {
       // brief hit-stop on kills and big hits gives impacts some weight
@@ -674,21 +725,63 @@ export class Game {
         simDt = dt * 0.1;
       }
       this._update(simDt);
+    } else if (state === 'transition') this._updateTransition(dt);
+    else if (state === 'dead') {
+      this._updateFx(dt);
+      if (this.deathDelay > 0 && (this.deathDelay -= dt) <= 0) this.ui.showDeath('You Have Fallen', this._runRows().map(([k, v]) => (k === 'Gold' ? ['Gold banked', v] : [k, v])));
+    } else {
+      // paused / perks / shop / settings: the scene is frozen, so don't burn
+      // the GPU re-rendering an identical frame (the canvas keeps the last one)
+      render = this._frozenFrames++ < 2;
+      if (state === 'paused' && this.input.hit('Escape', 'KeyP')) this.resume();
+      else if (state === 'shop' && this.input.hit('Escape', 'KeyE')) this.closeShop();
     }
-    else if (state === 'dead') this._updateFx(dt);
-    else if (state === 'paused' && this.input.hit('Escape', 'KeyP')) this.resume();
-    else if (state === 'shop' && this.input.hit('Escape', 'KeyE')) this.closeShop();
-    this.renderer.render(this.scene, this.camera);
+    if (state !== 'paused' && state !== 'perks' && state !== 'shop' && state !== 'settings') this._frozenFrames = 0;
+    // post-processing inputs decay over time
+    const fx = this.renderer.fx;
+    fx.hurt = Math.max(0, fx.hurt - dt * 2.2);
+    fx.lowHp = this.player && !this.player.dead && this.state !== 'menu' ? Math.max(0, 1 - this.player.hp / this.player.stats.maxHp / 0.3) : 0;
+    if (render) this.renderer.render(this.time);
     this.input.endFrame();
     requestAnimationFrame((t) => this._frame(t));
+  }
+
+  // Fade to black, build the next floor, fade back in.
+  descend() {
+    this.state = 'transition';
+    this.transT = 0;
+    this.transLoaded = false;
+    sfx.stairs();
+  }
+
+  _updateTransition(dt) {
+    this.transT += dt;
+    if (!this.transLoaded) {
+      this.fadeEl.style.opacity = String(Math.min(1, this.transT / 0.45));
+      this._updateFx(dt);
+      if (this.transT >= 0.5) {
+        this.transLoaded = true;
+        const p = this.player;
+        p.heal(p.stats.maxHp * 0.15);
+        this.loadFloor(this.depth + 1);
+        this.transT = 0;
+      }
+    } else {
+      this.fadeEl.style.opacity = String(Math.max(0, 1 - this.transT / 0.6));
+      this._updateFx(dt);
+      if (this.transT >= 0.6) {
+        this.fadeEl.style.opacity = '0';
+        this.state = 'playing';
+      }
+    }
   }
 
   _updateMenu(dt) {
     const t = this.time * 0.08;
     const c = this.menuCenter;
-    this.camera.position.set(c.x + Math.cos(t) * 26, 24, c.z + Math.sin(t) * 26);
+    this.camera.position.set(c.x + Math.cos(t) * 17, 15, c.z + Math.sin(t) * 17);
     this.camera.lookAt(c.x, 0, c.z);
-    this.world.update(dt, this.time, c.x + Math.cos(t * 2) * 10, c.z + Math.sin(t * 2) * 10, false);
+    this.world.update(dt, this.time, c.x, c.z, false);
   }
 
   _updateFx(dt) {
@@ -700,6 +793,7 @@ export class Game {
       const k = 1 - d.t / 0.22;
       if (k <= 0) {
         this.scene.remove(d.mesh);
+        disposeTree(d.mesh);
         this.dying.splice(i, 1);
         continue;
       }
@@ -717,10 +811,15 @@ export class Game {
     const w = this.world;
 
     if (inp.hit('Escape', 'KeyP')) return this.pause();
-    if (inp.hit('Tab')) this.ui.toggleMap();
+    if (inp.hit('Tab')) {
+      this.ui.toggleMap();
+      this.ui.drawMinimap(this);
+    }
+    this.simTime += dt;
+    this._tickTimers(dt);
 
     // ---- aim
-    const ndc = new THREE.Vector2((inp.mouse.x / this.vw) * 2 - 1, -(inp.mouse.y / this.vh) * 2 + 1);
+    const ndc = _v2.set((inp.mouse.x / this.vw) * 2 - 1, -(inp.mouse.y / this.vh) * 2 + 1);
     this.raycaster.setFromCamera(ndc, this.camera);
     if (this.raycaster.ray.intersectPlane(this.aimPlane, this.aimPoint)) {
       p.facing = Math.atan2(this.aimPoint.x - p.pos.x, this.aimPoint.z - p.pos.z);
@@ -861,11 +960,11 @@ export class Game {
       if (this.pendingChests > 0) {
         this.pendingChests -= 1;
         sfx.chest();
-        this.openPerks('Treasure!');
+        this.openPerks('Treasure Found');
       } else if (this.pendingLevels > 0) {
         this.pendingLevels -= 1;
         sfx.levelUp();
-        this.openPerks(`Level ${p.level - this.pendingLevels}!`);
+        this.openPerks(`Level ${p.level - this.pendingLevels}`);
       }
     }
   }
@@ -879,6 +978,7 @@ export class Game {
       pr.x += pr.vx * dt;
       pr.z += pr.vz * dt;
       pr.mesh.position.set(pr.x, 1.0, pr.z);
+      if (Math.random() < 0.7) this.fx.trail(pr.x, 1.0, pr.z, pr.trail, pr.owner === 'player' ? 0.28 : 0.2);
       if (pr.life <= 0 || this.world.solidAt(pr.x, pr.z)) {
         this.fx.burst(pr.x, 1, pr.z, pr.owner === 'player' ? 0x6ad0ff : 0xff5ab0, 5, 2, 0.3);
         this.projectiles.remove(i);
@@ -926,9 +1026,12 @@ export class Game {
       const d = Math.hypot(dx, dz);
       if (it.age > 0.35 && d < p.stats.magnet && (it.kind !== 'potion' || d < 1.4)) it.magnet = true;
       if (it.magnet) {
-        const sp = 6 + it.t * 6;
-        it.x += (dx / d) * Math.min(d, sp * dt);
-        it.z += (dz / d) * Math.min(d, sp * dt);
+        if (d > 1e-6) {
+          // guard: d == 0 would produce NaN and the pickup could never be collected
+          const sp = 6 + it.t * 6;
+          it.x += (dx / d) * Math.min(d, sp * dt);
+          it.z += (dz / d) * Math.min(d, sp * dt);
+        }
       } else {
         const ox = it.x;
         const oz = it.z;
@@ -984,9 +1087,10 @@ export class Game {
     let nd = 2.2;
     for (const it of this.interactables) {
       if (it.kind === 'stairs') {
-        it.ring.rotation.z += dt * 0.8;
-        it.ring2.rotation.z -= dt * 1.6;
-        it.ring2.position.y = 0.6 + Math.sin(this.time * 2) * 0.25;
+        it.portal.shader.uniforms.uTime.value = this.time;
+        it.portal.ring.position.y = 0.55 + Math.sin(this.time * 2) * 0.2;
+        it.portal.ring.rotation.y += dt;
+        if (!this.stairsLocked && Math.random() < 0.3) this.fx.sparks(it.x + (Math.random() - 0.5) * 2, 0.2, it.z + (Math.random() - 0.5) * 2, 0x5ad8ff, 1, 0.6, 1.2, -1.5);
       } else if (it.kind === 'shrine' && !it.used) {
         it.orb.rotation.y += dt;
         it.orb.position.y = 1.85 + Math.sin(this.time * 2) * 0.1;
@@ -1006,7 +1110,7 @@ export class Game {
       shrine: '[E] Pray at the shrine',
       merchant: '[E] Trade with the merchant',
     };
-    this.ui.prompt(nearest ? labels[nearest.kind] : '');
+    this.ui.prompt(nearest ? labels[nearest.kind] : '', nearest?.kind === 'stairs' && this.stairsLocked);
     if (nearest && this.input.hit('KeyE')) this._interact(nearest);
   }
 
@@ -1017,12 +1121,10 @@ export class Game {
         this.ui.toast('The guardian still lives');
         return;
       }
-      sfx.stairs();
-      p.heal(p.stats.maxHp * 0.15);
-      this.loadFloor(this.depth + 1);
+      this.descend();
     } else if (it.kind === 'chest') {
       it.used = true;
-      it.light.intensity = 1;
+      it.emitter.intensity = 3;
       const n = 4 + ((Math.random() * 4) | 0);
       for (let i = 0; i < n; i++) this.pickups.spawn('gold', it.x, it.z, Math.max(1, Math.round((2 + this.depth) * p.stats.goldMult)));
       this.fx.burst(it.x, 1, it.z, 0xffd04a, 30, 5);
@@ -1032,7 +1134,7 @@ export class Game {
     } else if (it.kind === 'shrine') {
       it.used = true;
       it.orbMat.color.set(0x334038);
-      it.light.intensity = 0;
+      it.emitter.intensity = 0;
       const h = Math.round(p.stats.maxHp * 0.6);
       p.stats.maxHp += 5;
       p.heal(h + 5);
@@ -1047,8 +1149,7 @@ export class Game {
     const p = this.player;
     this.camTarget.lerp(p.pos, Math.min(1, dt * 8));
     // lean the camera slightly toward the aim point
-    const lead = new THREE.Vector3(Math.sin(p.facing), 0, Math.cos(p.facing)).multiplyScalar(1.5);
-    const tgt = this.camTarget.clone().add(lead);
+    const tgt = _v3.set(Math.sin(p.facing) * 1.5, 0, Math.cos(p.facing) * 1.5).add(this.camTarget);
     this.camera.position.copy(tgt).add(CAM_OFFSET);
     if (this.shakeAmt > 0) {
       this.camera.position.x += (Math.random() - 0.5) * this.shakeAmt;

@@ -3,106 +3,169 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:" />
     <title>Depthwarden</title>
-    <link rel="stylesheet" href="./src/style.css" />
   </head>
   <body>
     <div id="app">
       <canvas id="view"></canvas>
 
+      <!-- ================================================================ HUD -->
       <div id="hud" class="hidden">
-        <div id="vitals">
-          <div class="bar hp"><div id="hp-fill" class="fill"></div><span id="hp-text"></span></div>
-          <div class="bar xp"><div id="xp-fill" class="fill"></div><span id="xp-text"></span></div>
-          <div id="stats-line"><span id="level">Lv 1</span><span id="gold">◈ 0</span><span id="kills">☠ 0</span></div>
+        <div id="vitals" class="frame">
+          <div id="level-medal"><span id="level">1</span><small>LVL</small></div>
+          <div id="bars">
+            <div class="bar hp">
+              <div id="hp-chip" class="chip"></div>
+              <div id="hp-fill" class="fill"></div>
+              <span id="hp-text"></span>
+            </div>
+            <div class="bar xp"><div id="xp-fill" class="fill"></div></div>
+            <div id="stats-line">
+              <span class="stat gold" title="Gold carried"><i data-icon="coin"></i><b id="gold">0</b></span>
+              <span class="stat" title="Enemies slain"><i data-icon="skull"></i><b id="kills">0</b></span>
+            </div>
+          </div>
         </div>
-        <div id="floor-label"></div>
-        <canvas id="minimap" width="200" height="200"></canvas>
+
+        <div id="floor-title">
+          <div id="floor-label"></div>
+          <div id="floor-sub"></div>
+        </div>
+
+        <div id="boss-bar" class="hidden">
+          <div id="boss-name"></div>
+          <div class="bar boss"><div id="boss-chip" class="chip"></div><div id="boss-fill" class="fill"></div></div>
+        </div>
+
+        <div id="map-frame" class="frame">
+          <canvas id="minimap" width="200" height="200"></canvas>
+          <div class="map-hint">TAB · map</div>
+        </div>
+
         <div id="abilities">
-          <div class="ability" id="ab-swing"><b>LMB</b><span>Sword</span><i></i></div>
-          <div class="ability" id="ab-bolt"><b>RMB</b><span>Bolt</span><i></i></div>
-          <div class="ability" id="ab-dash"><b>SPACE</b><span>Dash</span><i></i></div>
-          <div class="ability" id="ab-potion"><b>Q</b><span>Potion <em id="potion-count">1</em></span><i></i></div>
+          <div class="ability" id="ab-swing"><i data-icon="sword"></i><div class="cd"></div><kbd>LMB</kbd></div>
+          <div class="ability" id="ab-bolt"><i data-icon="bolt"></i><div class="cd"></div><kbd>RMB</kbd></div>
+          <div class="ability" id="ab-dash"><i data-icon="dash"></i><div class="cd"></div><kbd>SPACE</kbd></div>
+          <div class="ability potion" id="ab-potion"><i data-icon="flask"></i><div class="cd"></div><kbd>Q</kbd><em id="potion-count">1</em></div>
         </div>
-        <div id="boss-bar" class="hidden"><div id="boss-name"></div><div class="bar"><div id="boss-fill" class="fill"></div></div></div>
+
         <div id="prompt" class="hidden"></div>
         <div id="perk-list"></div>
       </div>
 
-      <div id="vignette"></div>
       <div id="dmg-layer"></div>
-      <div id="banner" class="hidden"><h2 id="banner-title"></h2><p id="banner-sub"></p></div>
+      <div id="banner" class="hidden"><div class="rule"></div><h2 id="banner-title"></h2><p id="banner-sub"></p><div class="rule"></div></div>
       <div id="toast"></div>
+      <div id="fade"></div>
 
+      <!-- ============================================================ SCREENS -->
       <div id="menu" class="screen">
-        <h1>DEPTHWARDEN</h1>
-        <p class="tagline">Descend. Die. Grow stronger. Descend again.</p>
+        <div class="title-block">
+          <div class="sigil"></div>
+          <h1>Depthwarden</h1>
+          <p class="tagline">Descend · Die · Grow stronger · Descend again</p>
+        </div>
         <div class="menu-buttons">
           <button id="btn-start" class="primary">Begin Descent</button>
-          <button id="btn-armory">Armory</button>
-          <button id="btn-controls">Controls</button>
-          <button id="btn-quit" class="desktop-only">Quit</button>
+          <button id="btn-armory"><i data-icon="shield"></i>Armory</button>
+          <button id="btn-settings"><i data-icon="gear"></i>Settings</button>
+          <button id="btn-controls"><i data-icon="map"></i>How to Play</button>
+          <button id="btn-quit"><i data-icon="door"></i>Quit</button>
         </div>
-        <label class="seed">Seed <input id="seed-input" placeholder="random" maxlength="24" /></label>
+        <label class="seed">Seed <input id="seed-input" placeholder="random" maxlength="24" spellcheck="false" /></label>
         <div id="menu-stats"></div>
       </div>
 
       <div id="armory" class="screen hidden">
-        <h2>Armory</h2>
-        <p class="sub">Gold you carry out of the depths is banked here. Upgrades are permanent.</p>
-        <div id="armory-gold"></div>
-        <div id="armory-list"></div>
-        <button class="back">Back</button>
+        <div class="panel wide">
+          <h2>The Armory</h2>
+          <p class="sub">Gold you carry out of the depths is banked here. Upgrades last forever.</p>
+          <div id="armory-gold" class="purse"></div>
+          <div id="armory-list" class="grid"></div>
+          <button class="back">Back</button>
+        </div>
       </div>
 
       <div id="controls" class="screen hidden">
-        <h2>Controls</h2>
-        <table>
-          <tr><td>WASD / Arrows</td><td>Move</td></tr>
-          <tr><td>Mouse</td><td>Aim</td></tr>
-          <tr><td>Left mouse (hold)</td><td>Sword sweep (deflects projectiles, smashes urns)</td></tr>
-          <tr><td>Right mouse (hold)</td><td>Arcane bolt</td></tr>
-          <tr><td>Space / Shift</td><td>Dash (invulnerable while dashing)</td></tr>
-          <tr><td>E</td><td>Interact: chests, shrines, merchants, stairs</td></tr>
-          <tr><td>Q</td><td>Drink potion</td></tr>
-          <tr><td>Tab</td><td>Toggle large map</td></tr>
-          <tr><td>Esc / P</td><td>Pause</td></tr>
-          <tr><td>F11</td><td>Fullscreen</td></tr>
-        </table>
-        <p class="sub">Every floor is procedurally generated. A guardian waits every 4th floor. Defeat the guardian of floor 12 to win.</p>
-        <button class="back">Back</button>
+        <div class="panel">
+          <h2>How to Play</h2>
+          <div class="keys">
+            <div><span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></span>Move</div>
+            <div><span><kbd>Mouse</kbd></span>Aim</div>
+            <div><span><kbd>LMB</kbd></span>Sword sweep: deflects shots, smashes urns</div>
+            <div><span><kbd>RMB</kbd></span>Arcane bolt</div>
+            <div><span><kbd>Space</kbd></span>Dash: untouchable while dashing</div>
+            <div><span><kbd>E</kbd></span>Chests, shrines, merchants, the way down</div>
+            <div><span><kbd>Q</kbd></span>Drink a potion</div>
+            <div><span><kbd>Tab</kbd></span>Full map</div>
+            <div><span><kbd>Esc</kbd></span>Pause</div>
+            <div><span><kbd>F11</kbd></span>Fullscreen</div>
+          </div>
+          <p class="sub">Every floor is generated anew. A guardian waits on every 4th floor; slay the guardian of floor 12 to seal the depths.</p>
+          <button class="back">Back</button>
+        </div>
+      </div>
+
+      <div id="settings" class="screen hidden">
+        <div class="panel">
+          <h2>Settings</h2>
+          <div class="setting">
+            <label>Graphics</label>
+            <div class="segmented" id="set-quality">
+              <button data-v="low">Low</button><button data-v="medium">Medium</button><button data-v="high">High</button>
+            </div>
+          </div>
+          <p class="hint" id="quality-hint"></p>
+          <div class="setting">
+            <label for="volume">Volume</label>
+            <input id="volume" type="range" min="0" max="1" step="0.05" />
+          </div>
+          <div class="setting">
+            <label>Screen shake</label>
+            <button class="toggle" id="set-shake" role="switch"></button>
+          </div>
+          <div class="setting">
+            <label>Damage numbers</label>
+            <button class="toggle" id="set-numbers" role="switch"></button>
+          </div>
+          <button class="back">Back</button>
+        </div>
       </div>
 
       <div id="perks" class="screen hidden overlay">
-        <h2 id="perks-title">Level Up!</h2>
-        <p class="sub">Choose a boon (1, 2, 3)</p>
-        <div id="perk-cards"></div>
+        <h2 id="perks-title">Level Up</h2>
+        <p class="sub">Choose a boon <kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd></p>
+        <div id="perk-cards" class="cards"></div>
       </div>
 
       <div id="shop" class="screen hidden overlay">
         <h2>The Wandering Merchant</h2>
-        <p class="sub">"Gold spent down here is gold you won't bank... but you might live to bank the rest."</p>
-        <div id="shop-gold"></div>
-        <div id="shop-items"></div>
-        <button id="btn-leave-shop">Leave (E / Esc)</button>
+        <p class="sub quote">"Gold spent down here is gold you won't bank… but you might live to bank the rest."</p>
+        <div id="shop-gold" class="purse"></div>
+        <div id="shop-items" class="cards"></div>
+        <button id="btn-leave-shop">Leave <kbd>E</kbd></button>
       </div>
 
       <div id="pause" class="screen hidden overlay">
-        <h2>Paused</h2>
-        <div class="menu-buttons">
-          <button id="btn-resume" class="primary">Resume</button>
-          <label class="volume">Volume <input id="volume" type="range" min="0" max="1" step="0.05" /></label>
-          <button id="btn-abandon">Abandon Run</button>
+        <div class="panel narrow">
+          <h2>Paused</h2>
+          <div class="menu-buttons">
+            <button id="btn-resume" class="primary">Resume</button>
+            <button id="btn-pause-settings"><i data-icon="gear"></i>Settings</button>
+            <button id="btn-abandon"><i data-icon="door"></i>Abandon Run</button>
+          </div>
         </div>
       </div>
 
       <div id="death" class="screen hidden overlay">
-        <h2 id="death-title">You Have Fallen</h2>
-        <div id="death-stats"></div>
-        <div class="menu-buttons">
-          <button id="btn-retry" class="primary">Descend Again</button>
-          <button id="btn-menu">Main Menu</button>
+        <div class="panel">
+          <h2 id="death-title">You Have Fallen</h2>
+          <div id="death-stats"></div>
+          <div class="menu-buttons row">
+            <button id="btn-retry" class="primary">Descend Again</button>
+            <button id="btn-menu">Main Menu</button>
+          </div>
         </div>
       </div>
     </div>

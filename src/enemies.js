@@ -15,12 +15,19 @@ export const ENEMY_DEFS = {
 
 const geoCache = {};
 function geo(key, make) {
-  return geoCache[key] || (geoCache[key] = make());
+  if (!geoCache[key]) {
+    geoCache[key] = make();
+    geoCache[key].userData.shared = true;
+  }
+  return geoCache[key];
 }
 
 let shadowMat = null;
 export function blobShadow(radius) {
-  if (!shadowMat) shadowMat = new THREE.MeshBasicMaterial({ map: glowTexture(), color: 0x000000, transparent: true, opacity: 0.55, depthWrite: false });
+  if (!shadowMat) {
+    shadowMat = new THREE.MeshBasicMaterial({ map: glowTexture(), color: 0x000000, transparent: true, opacity: 0.6, depthWrite: false });
+    shadowMat.userData.shared = true;
+  }
   const m = new THREE.Mesh(geo('shadow', () => new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2)), shadowMat);
   m.position.y = 0.03;
   m.scale.setScalar(radius * 3);
@@ -32,7 +39,8 @@ function buildModel(type, def, elite) {
   const g = new THREE.Group();
   g.add(blobShadow(def.radius));
   const mat = new THREE.MeshStandardMaterial({ color: def.color, roughness: 0.6, metalness: 0.1, emissive: 0x000000 });
-  const eyeMat = new THREE.MeshBasicMaterial({ color: type === 'wisp' ? 0xffffff : 0xff3a2a });
+  // eyes are over-bright so they bloom in the dark
+  const eyeMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(type === 'wisp' ? 0xffffff : 0xff3a2a).multiplyScalar(3) });
   const eye = geo('eye', () => new THREE.SphereGeometry(0.06, 6, 6));
   const addEyes = (y, z, spread = 0.12, scale = 1) => {
     for (const s of [-1, 1]) {
@@ -62,7 +70,7 @@ function buildModel(type, def, elite) {
       body.position.y = 1.1;
       body.scale.set(1, 1.3, 1);
       addEyes(1.25, 0.36, 0.14);
-      const sac = new THREE.Mesh(geo('sac', () => new THREE.SphereGeometry(0.22, 8, 8)), new THREE.MeshBasicMaterial({ color: 0xd88cff }));
+      const sac = new THREE.Mesh(geo('sac', () => new THREE.SphereGeometry(0.22, 8, 8)), new THREE.MeshBasicMaterial({ color: new THREE.Color(0xd88cff).multiplyScalar(1.6) }));
       sac.position.set(0, 0.95, 0.38);
       g.add(sac);
       break;
@@ -112,7 +120,7 @@ function buildModel(type, def, elite) {
       g.add(skull);
       const staff = new THREE.Mesh(geo('staff', () => new THREE.CylinderGeometry(0.04, 0.04, 1.8, 6)), new THREE.MeshStandardMaterial({ color: 0x4a3626 }));
       staff.position.set(0.5, 0.9, 0.1);
-      const orb = new THREE.Mesh(geo('orb', () => new THREE.SphereGeometry(0.12, 8, 8)), new THREE.MeshBasicMaterial({ color: 0x7affb0 }));
+      const orb = new THREE.Mesh(geo('orb', () => new THREE.SphereGeometry(0.12, 8, 8)), new THREE.MeshBasicMaterial({ color: new THREE.Color(0x7affb0).multiplyScalar(2) }));
       orb.position.set(0.5, 1.85, 0.1);
       g.add(staff, orb);
       addEyes(1.58, 0.22, 0.09);
@@ -129,13 +137,10 @@ function buildModel(type, def, elite) {
         s.position.set(Math.cos(a) * 0.8, 3.1, Math.sin(a) * 0.8);
         g.add(s);
       }
-      const coreMat = new THREE.MeshBasicMaterial({ color: 0xff3a6a });
+      const coreMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0xff3a6a).multiplyScalar(2.5) });
       const core = new THREE.Mesh(geo('core', () => new THREE.SphereGeometry(0.35, 12, 10)), coreMat);
       core.position.set(0, 1.9, 1.05);
       g.add(core);
-      const l = new THREE.PointLight(0xff3a6a, 8, 10, 1.5);
-      l.position.set(0, 2.2, 1.6);
-      g.add(l);
       break;
     }
   }
@@ -180,6 +185,8 @@ export class Enemy {
     if (elite) this.mat.emissive.set(0x442200);
     this.baseEmissive = this.mat.emissive.clone();
     this.mesh.position.copy(this.pos);
+    // light this enemy casts (registered with the world's light pool by the game)
+    this.lightSpec = type === 'boss' ? { color: 0xff3a6a, intensity: 22, distance: 14, y: 2.4, priority: 20 } : null;
   }
 
   get dist() {
@@ -455,8 +462,12 @@ export class Enemy {
     if (this.type === 'boss') {
       g.bossAwake(this);
     }
+    // Alert neighbours. The boss must go through wake() so its intro and
+    // health bar trigger; everyone else just starts chasing.
     for (const o of g.enemies) {
-      if (!o.awake && o !== this && (o.pos.x - this.pos.x) ** 2 + (o.pos.z - this.pos.z) ** 2 < 49) o.awake = true;
+      if (o.awake || o === this || (o.pos.x - this.pos.x) ** 2 + (o.pos.z - this.pos.z) ** 2 >= 49) continue;
+      if (o.type === 'boss') o.wake(g);
+      else o.awake = true;
     }
   }
 }

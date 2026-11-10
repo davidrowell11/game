@@ -76,6 +76,8 @@ All downloads are also listed on the [Releases page](https://github.com/davidrow
 
 **Enemies:** Husks (melee), Spitters (ranged), Brutes (they telegraph, then charge, and are stunned if they hit a wall), Bloaters (they swell up and explode, and also burst when killed, so lure them into groups), Wisps (fast swarmers), Bone Shamans (summon Husks), and the Hollow Warden boss (bullet novas, aimed fans, ground slams and summons; below 50% health it gets enraged and adds spiral bullet streams).
 
+**Settings** (main menu or pause menu): Graphics **Low** (fastest, no post-processing), **Medium** (bloom, colour grading, atmosphere particles; the default) or **High** (adds real-time shadows from your lantern), plus volume, screen shake and damage numbers.
+
 Your progress is saved automatically here:
 - Windows: `%APPDATA%\Depthwarden`
 - macOS: `~/Library/Application Support/Depthwarden`
@@ -151,9 +153,11 @@ src/
   save.js       Persistent gold and Armory upgrades
   effects.js    Particles, projectiles, pickups, damage numbers
   props.js      Spike traps, breakable urns, the merchant
-  ui.js         HUD, minimap, menus
+  render.js     Rendering pipeline: MSAA, bloom, tone mapping, colour grade, quality presets
+  ui.js         HUD, minimap, menus (only touches the DOM when a value changes)
+  icons.js      SVG icon set used by the HUD and menus
   audio.js      Sound effects synthesised at runtime (no audio files)
-  textures.js   Procedural textures (no image files)
+  textures.js   Procedural albedo + normal-map textures (no image files)
 electron/       Desktop window wrapper
 build/          App icon and macOS signing hook
 test/           Dungeon generator tests
