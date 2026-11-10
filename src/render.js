@@ -91,6 +91,8 @@ export class Renderer {
       });
     }
     if (this.composer) {
+      // EffectComposer.dispose() frees its own targets but not the passes'
+      for (const pass of this.composer.passes) pass.dispose?.();
       this.composer.dispose();
       this.composer = null;
     }

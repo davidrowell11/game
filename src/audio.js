@@ -11,7 +11,15 @@ function ensure() {
   ctx = new AC();
   master = ctx.createGain();
   master.gain.value = volume;
-  master.connect(ctx.destination);
+  // A limiter after the master bus: dozens of overlapping voices (a boss
+  // nova, a shower of coins) would otherwise sum past full scale and clip.
+  const limiter = ctx.createDynamicsCompressor();
+  limiter.threshold.value = -10;
+  limiter.knee.value = 6;
+  limiter.ratio.value = 12;
+  limiter.attack.value = 0.003;
+  limiter.release.value = 0.15;
+  master.connect(limiter).connect(ctx.destination);
   noiseBuf = ctx.createBuffer(1, ctx.sampleRate * 0.5, ctx.sampleRate);
   const d = noiseBuf.getChannelData(0);
   for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
@@ -24,7 +32,8 @@ export function unlockAudio() {
 
 export function setVolume(v) {
   volume = v;
-  if (master) master.gain.value = v;
+  // ramp rather than jump, which avoids an audible click while dragging
+  if (master) master.gain.setTargetAtTime(v, ctx.currentTime, 0.02);
 }
 
 function tone({ type = 'square', f0 = 440, f1 = f0, dur = 0.12, gain = 0.2, delay = 0 }) {
@@ -59,7 +68,7 @@ function noise({ dur = 0.1, gain = 0.2, freq = 2000, type = 'bandpass', q = 1, d
   s.stop(t + dur + 0.02);
 }
 
-export const sfx = {
+const voices = {
   swing: () => noise({ dur: 0.12, gain: 0.25, freq: 2600, q: 0.8 }),
   hit: () => {
     tone({ type: 'square', f0: 220, f1: 90, dur: 0.09, gain: 0.12 });
@@ -108,6 +117,21 @@ export const sfx = {
   death: () => [400, 300, 220, 150, 90].forEach((f, i) => tone({ type: 'sawtooth', f0: f, f1: f * 0.8, dur: 0.35, gain: 0.12, delay: i * 0.15 })),
   click: () => tone({ type: 'square', f0: 700, dur: 0.04, gain: 0.05 }),
 };
+
+// The same effect can't retrigger within 30 ms: 22 simultaneous "enemy shot"
+// voices sound no different from one, they just stack up and distort.
+const lastPlayed = {};
+export const sfx = Object.fromEntries(
+  Object.entries(voices).map(([name, play]) => [
+    name,
+    () => {
+      const now = performance.now();
+      if (now - (lastPlayed[name] || 0) < 30) return;
+      lastPlayed[name] = now;
+      play();
+    },
+  ]),
+);
 
 // A low, slowly-moving drone for atmosphere.
 let drone = null;

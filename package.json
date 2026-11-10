@@ -1,6 +1,6 @@
 {
   "name": "depthwarden",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "A 3D roguelite dungeon crawler with procedurally generated dungeons.",
   "author": "David Rowell",
   "license": "MIT",

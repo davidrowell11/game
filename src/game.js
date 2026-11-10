@@ -21,8 +21,10 @@ class Input {
     this.keys = new Set();
     this.pressed = new Set();
     this.mouse = { x: 0, y: 0, left: false, right: false };
+    // Typing into a text field (the seed box) is not game input.
+    const typing = (e) => e.target instanceof HTMLElement && (e.target.tagName === 'INPUT' || e.target.isContentEditable);
     addEventListener('keydown', (e) => {
-      if (e.repeat) return;
+      if (e.repeat || typing(e)) return;
       this.keys.add(e.code);
       this.pressed.add(e.code);
       if (['Space', 'Tab', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
@@ -479,6 +481,7 @@ export class Game {
 
   bossAwake(e) {
     this.boss = e;
+    this.ui.hideBanner(); // the boss bar takes over the top of the screen
     this.ui.el.bossName.textContent = (e.def.name + (this.depth > 4 ? ` · ${['', '', 'Reborn', 'Ascendant'][Math.min(3, this.depth / 4)] || 'Eternal'}` : '')).toUpperCase();
     sfx.roar();
     this.shake(0.5);

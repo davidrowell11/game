@@ -35,10 +35,30 @@ export function blobShadow(radius) {
   return m;
 }
 
+// Fresnel rim light: keeps monsters readable against any theme's floor, even
+// under strongly coloured light (Ember Halls) or in deep shadow. All enemy
+// materials share one compiled program via customProgramCacheKey.
+function addRim(mat, color, strength = 0.9) {
+  mat.userData.rim = { value: new THREE.Color(color).lerp(new THREE.Color(0xffffff), 0.35).multiplyScalar(strength) };
+  mat.onBeforeCompile = (shader) => {
+    shader.uniforms.uRim = mat.userData.rim;
+    shader.fragmentShader = shader.fragmentShader
+      .replace('void main() {', 'uniform vec3 uRim;\nvoid main() {')
+      .replace(
+        '#include <opaque_fragment>',
+        `float rimF = pow(1.0 - clamp(dot(normal, normalize(vViewPosition)), 0.0, 1.0), 2.2);
+        outgoingLight += uRim * rimF;
+        #include <opaque_fragment>`,
+      );
+  };
+  mat.customProgramCacheKey = () => 'enemy-rim';
+}
+
 function buildModel(type, def, elite) {
   const g = new THREE.Group();
   g.add(blobShadow(def.radius));
   const mat = new THREE.MeshStandardMaterial({ color: def.color, roughness: 0.6, metalness: 0.1, emissive: 0x000000 });
+  addRim(mat, def.color, type === 'boss' ? 1.2 : 0.9);
   // eyes are over-bright so they bloom in the dark
   const eyeMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(type === 'wisp' ? 0xffffff : 0xff3a2a).multiplyScalar(3) });
   const eye = geo('eye', () => new THREE.SphereGeometry(0.06, 6, 6));
@@ -425,8 +445,10 @@ export class Enemy {
         const n = this.phase === 2 ? 7 : 5;
         for (let i = 0; i < n; i++) g.enemyShoot(this, a + (i - (n - 1) / 2) * 0.16, this.def.projSpeed * 1.2, this.dmg * 0.8);
       } else if (pattern === 'summon') {
-        for (let i = 0; i < (this.phase === 2 ? 4 : 3); i++) {
-          const ang = (i / 3) * Math.PI * 2;
+        const n = this.phase === 2 ? 4 : 3;
+        for (let i = 0; i < n; i++) {
+          // spread evenly (dividing by a fixed 3 stacked the 4th summon on the 1st)
+          const ang = (i / n) * Math.PI * 2;
           g.spawnEnemy(Math.random() < 0.5 ? 'husk' : 'wisp', this.pos.x + Math.cos(ang) * 3, this.pos.z + Math.sin(ang) * 3, true);
         }
         g.fx.burst(this.pos.x, 1.5, this.pos.z, 0xb070ff, 30, 6);

@@ -549,7 +549,7 @@ kbd {
 
 #banner {
   position: absolute;
-  top: 24%;
+  top: 13%; /* above the action: the player is always centre-screen */
   left: 0;
   right: 0;
   text-align: center;
@@ -557,7 +557,7 @@ kbd {
   animation: banner 3.2s ease forwards;
 }
 #banner h2 {
-  font: 700 clamp(36px, 5.5vw, 64px) / 1.1 var(--display);
+  font: 700 clamp(30px, 4.4vw, 52px) / 1.1 var(--display);
   letter-spacing: 10px;
   margin: 10px 0 6px;
   color: var(--gold-hi);
