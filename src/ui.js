@@ -101,6 +101,10 @@ export class UI {
     b.style.animation = '';
   }
 
+  hideBanner() {
+    this.el.banner.classList.add('hidden');
+  }
+
   toast(text, seconds = 2) {
     this.el.toast.textContent = text;
     this.el.toast.classList.add('show');

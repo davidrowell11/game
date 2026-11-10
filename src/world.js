@@ -23,7 +23,7 @@ export const LIGHT_POOL = 8;
 const THEMES = [
   { name: 'Forgotten Crypt', wall: 0xa4a8b4, top: 0x4a4e5a, floor: 0x8a857c, bg: 0x07080b, torch: 0xff9a40, hemi: [0x4a5a7a, 0x140e0a], dust: 0xffd8a8 },
   { name: 'Mossy Catacombs', wall: 0x8ea284, top: 0x2e3a28, floor: 0x6c7860, bg: 0x050906, torch: 0xd8ff7a, hemi: [0x3a5a42, 0x0c0e08], dust: 0xd8ffb0 },
-  { name: 'Ember Halls', wall: 0xb07e6c, top: 0x46281e, floor: 0x6c4a40, bg: 0x0c0504, torch: 0xff6a2a, hemi: [0x6a3a2c, 0x120604], dust: 0xffa060 },
+  { name: 'Ember Halls', wall: 0xb89484, top: 0x3e2a24, floor: 0x7a625a, bg: 0x0c0504, torch: 0xff8f4a, hemi: [0x5a4a52, 0x120604], dust: 0xffa060 },
   { name: 'Frozen Vault', wall: 0xb0cce0, top: 0x2e4252, floor: 0x7a92a4, bg: 0x05080d, torch: 0x7ad8ff, hemi: [0x3a5c7c, 0x080c12], dust: 0xc8ecff },
 ];
 
@@ -294,7 +294,9 @@ export class World {
     }
     wallGeo.setAttribute('color', new THREE.BufferAttribute(vcol, 3));
     const side = new THREE.MeshStandardMaterial({ map: tex.brick.map, normalMap: tex.brick.normal, normalScale: new THREE.Vector2(1.4, 1.4), color: theme.wall, roughness: 0.88, vertexColors: true });
-    const top = new THREE.MeshStandardMaterial({ map: tex.floor.map, color: new THREE.Color(theme.top).multiplyScalar(1.6), emissive: theme.top, emissiveIntensity: 0.55, emissiveMap: tex.floor.map, roughness: 1 });
+    // Wall tops: rough dark rock, deliberately NOT the floor texture, so solid
+    // rock never reads as walkable floor from the top-down camera.
+    const top = new THREE.MeshStandardMaterial({ color: new THREE.Color(theme.top).multiplyScalar(0.9), normalMap: tex.brick.normal, normalScale: new THREE.Vector2(0.6, 0.6), emissive: theme.top, emissiveIntensity: 0.32, roughness: 1 });
     const walls = new THREE.InstancedMesh(wallGeo, [side, side, top, top, side, side], wallCells.length);
     wallCells.forEach(([x, y], i) => {
       const c = tileCenter(x, y);
